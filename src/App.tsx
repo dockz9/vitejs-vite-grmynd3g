@@ -8,12 +8,12 @@ import {
 
 // ─── PASTE YOUR FIREBASE CONFIG HERE ─────────────────────────────────────────
 const firebaseConfig = {
-  apiKey: "PASTE_YOUR_API_KEY",
-  authDomain: "PASTE_YOUR_AUTH_DOMAIN",
-  projectId: "PASTE_YOUR_PROJECT_ID",
-  storageBucket: "PASTE_YOUR_STORAGE_BUCKET",
-  messagingSenderId: "PASTE_YOUR_MESSAGING_SENDER_ID",
-  appId: "PASTE_YOUR_APP_ID",
+  apiKey: "AIzaSyBs2rE2LhIQ6-8iHcjqNm1JoMpLnrEppes",
+  authDomain: "crmz-503e0.firebaseapp.com",
+  projectId: "crmz-503e0",
+  storageBucket: "crmz-503e0.firebasestorage.app",
+  messagingSenderId: "631776362334",
+  appId: "1:631776362334:web:b886d3684885884d0259cf",
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
