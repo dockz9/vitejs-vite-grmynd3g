@@ -572,13 +572,21 @@ function CSVImportModal({ onClose, contactsCol }) {
   }
 
   const IMPORT_FIELDS = [
-    { key: "name", label: "Full Name" }, { key: "email", label: "Email" },
-    { key: "company", label: "Company" }, { key: "phone", label: "Phone" },
-    { key: "jobTitle", label: "Job Title" }, { key: "metroArea", label: "Metro Area" },
-    { key: "address", label: "Address" }, { key: "birthday", label: "Birthday" },
-    { key: "school", label: "School" }, { key: "backgroundInfo", label: "Background Info" },
-    { key: "connectedVia", label: "Connected / Introduced By" },
-    { key: "notes", label: "Notes" }, { key: "status", label: "Status" },
+    { key: "firstName", label: "First Name" }, { key: "middleName", label: "Middle Name" },
+    { key: "lastName", label: "Last Name" }, { key: "suffix", label: "Suffix" },
+    { key: "company", label: "Company Name" }, { key: "email", label: "Primary Email" },
+    { key: "phone", label: "Primary Phone" }, { key: "street1", label: "Street 1" },
+    { key: "street2", label: "Street 2" }, { key: "city", label: "City" },
+    { key: "state", label: "State" }, { key: "zip", label: "Zip" },
+    { key: "country", label: "Country" }, { key: "website", label: "Website" },
+    { key: "jobTitle", label: "Job Title" }, { key: "birthday", label: "Birthday" },
+    { key: "backgroundInfo", label: "Background Info" }, { key: "industry", label: "Industry" },
+    { key: "investments", label: "Investments" }, { key: "linkedIn", label: "LinkedIn" },
+    { key: "school", label: "School" }, { key: "connectedVia", label: "Connected / Introduced By" },
+    { key: "platformDescription", label: "Platform Description" }, { key: "researchTeam", label: "Research Team" },
+    { key: "metroArea", label: "Metro Area" }, { key: "bd", label: "B/D" },
+    { key: "importGroups", label: "Groups (from import)" }, { key: "notes", label: "Notes" },
+    { key: "status", label: "Status" },
   ];
 
   function handleFile(e) {
@@ -590,18 +598,33 @@ function CSVImportModal({ onClose, contactsCol }) {
       const autoMap = {};
       headers.forEach(h => {
         const lower = h.toLowerCase().replace(/[\s_\-]/g, "");
-        if ((lower.includes("firstname") || lower.includes("fullname") || lower === "name") && !lower.includes("company")) autoMap.name = h;
-        else if (lower.includes("lastname") && !autoMap.name) autoMap.name = h;
-        if (lower.includes("email")) autoMap.email = h;
-        if (lower.includes("company") || lower.includes("organization") || lower.includes("employer")) autoMap.company = h;
-        if (lower.includes("phone") || lower.includes("mobile") || lower.includes("cell")) autoMap.phone = h;
-        if (lower.includes("jobtitle") || lower.includes("title") || lower.includes("position") || lower.includes("role")) autoMap.jobTitle = h;
-        if (lower.includes("metro") || lower.includes("city") || lower.includes("region") || lower.includes("location")) autoMap.metroArea = h;
-        if (lower.includes("address") || lower.includes("street")) autoMap.address = h;
+        if (lower === "firstname" || lower === "first") autoMap.firstName = h;
+        if (lower === "middlename" || lower === "middle") autoMap.middleName = h;
+        if (lower === "lastname" || lower === "last") autoMap.lastName = h;
+        if (lower === "suffix") autoMap.suffix = h;
+        if (lower.includes("companyname") || lower === "company" || lower.includes("organization") || lower.includes("employer")) autoMap.company = h;
+        if (lower.includes("primaryemail") || lower === "email" || lower.includes("emailaddress")) autoMap.email = h;
+        if (lower.includes("primaryphone") || lower === "phone" || lower.includes("mobile") || lower.includes("cell")) autoMap.phone = h;
+        if (lower.includes("street1") || lower.includes("address1") || lower.includes("primarystreet1")) autoMap.street1 = h;
+        if (lower.includes("street2") || lower.includes("address2") || lower.includes("primarystreet2")) autoMap.street2 = h;
+        if (lower.includes("primarycity") || lower === "city") autoMap.city = h;
+        if (lower.includes("primarystate") || lower === "state") autoMap.state = h;
+        if (lower.includes("primaryzip") || lower === "zip" || lower.includes("postal")) autoMap.zip = h;
+        if (lower.includes("primarycountry") || lower === "country") autoMap.country = h;
+        if (lower.includes("website") || lower.includes("url")) autoMap.website = h;
+        if (lower.includes("jobtitle") || lower === "title" || lower.includes("position") || lower.includes("role")) autoMap.jobTitle = h;
         if (lower.includes("birthday") || lower.includes("birthdate") || lower.includes("dob")) autoMap.birthday = h;
-        if (lower.includes("school") || lower.includes("university") || lower.includes("college") || lower.includes("education")) autoMap.school = h;
         if (lower.includes("background") || lower.includes("bio") || lower.includes("about")) autoMap.backgroundInfo = h;
-        if (lower.includes("connected") || lower.includes("introduced") || lower.includes("referral") || lower.includes("source")) autoMap.connectedVia = h;
+        if (lower.includes("industry") || lower.includes("sector")) autoMap.industry = h;
+        if (lower.includes("investment")) autoMap.investments = h;
+        if (lower.includes("linkedin")) autoMap.linkedIn = h;
+        if (lower.includes("school") || lower.includes("university") || lower.includes("college") || lower.includes("education")) autoMap.school = h;
+        if (lower.includes("connected") || lower.includes("introduced") || lower.includes("referral")) autoMap.connectedVia = h;
+        if (lower.includes("platform") || lower.includes("description")) autoMap.platformDescription = h;
+        if (lower.includes("research") || lower.includes("team")) autoMap.researchTeam = h;
+        if (lower.includes("metro") || lower.includes("metroarea")) autoMap.metroArea = h;
+        if (lower === "bd" || lower.includes("b/d") || lower.includes("brokerdealer")) autoMap.bd = h;
+        if (lower.includes("group")) autoMap.importGroups = h;
         if (lower.includes("note")) autoMap.notes = h;
         if (lower.includes("status") || lower.includes("stage") || lower.includes("type")) autoMap.status = h;
       });
@@ -614,14 +637,44 @@ function CSVImportModal({ onClose, contactsCol }) {
   async function doImport() {
     setImporting(true);
     for (const row of preview.allRows) {
+      const firstName = row[mapping.firstName] || "";
+      const lastName = row[mapping.lastName] || "";
+      const middleName = row[mapping.middleName] || "";
+      const suffix = row[mapping.suffix] || "";
+      const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(" ");
+      const street1 = row[mapping.street1] || "";
+      const street2 = row[mapping.street2] || "";
+      const city = row[mapping.city] || "";
+      const state = row[mapping.state] || "";
+      const zip = row[mapping.zip] || "";
+      const country = row[mapping.country] || "";
+      const addressParts = [street1, street2, city, state, zip, country].filter(Boolean);
       const contact = {
-        name: row[mapping.name] || "", email: row[mapping.email] || "",
-        company: row[mapping.company] || "", phone: row[mapping.phone] || "",
-        jobTitle: row[mapping.jobTitle] || "", metroArea: row[mapping.metroArea] || "",
-        address: row[mapping.address] || "", birthday: row[mapping.birthday] || "",
-        school: row[mapping.school] || "", backgroundInfo: row[mapping.backgroundInfo] || "",
-        connectedVia: row[mapping.connectedVia] || "", notes: row[mapping.notes] || "",
-        status: row[mapping.status] || "prospect", tags: [], importedAt: new Date().toISOString(),
+        name: fullName,
+        firstName, middleName, lastName, suffix,
+        email: row[mapping.email] || "",
+        company: row[mapping.company] || "",
+        phone: row[mapping.phone] || "",
+        address: addressParts.join(", "),
+        street1, street2, city, state, zip, country,
+        website: row[mapping.website] || "",
+        jobTitle: row[mapping.jobTitle] || "",
+        birthday: row[mapping.birthday] || "",
+        backgroundInfo: row[mapping.backgroundInfo] || "",
+        industry: row[mapping.industry] || "",
+        investments: row[mapping.investments] || "",
+        linkedIn: row[mapping.linkedIn] || "",
+        school: row[mapping.school] || "",
+        connectedVia: row[mapping.connectedVia] || "",
+        platformDescription: row[mapping.platformDescription] || "",
+        researchTeam: row[mapping.researchTeam] || "",
+        metroArea: row[mapping.metroArea] || city || "",
+        bd: row[mapping.bd] || "",
+        importGroups: row[mapping.importGroups] || "",
+        notes: row[mapping.notes] || "",
+        status: row[mapping.status] || "prospect",
+        tags: [],
+        importedAt: new Date().toISOString(),
       };
       if (contact.name || contact.email) await contactsCol.add(contact);
     }
@@ -678,7 +731,7 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState(null);
-  const blank = { name: "", company: "", email: "", phone: "", jobTitle: "", metroArea: "", address: "", birthday: "", school: "", backgroundInfo: "", connectedVia: "", status: "prospect", tags: "", notes: "" };
+  const blank = { name: "", firstName: "", lastName: "", company: "", email: "", phone: "", jobTitle: "", metroArea: "", address: "", city: "", state: "", zip: "", country: "", website: "", birthday: "", school: "", backgroundInfo: "", industry: "", investments: "", linkedIn: "", connectedVia: "", platformDescription: "", researchTeam: "", bd: "", status: "prospect", tags: "", notes: "" };
   const [form, setForm] = useState(blank);
 
   const filtered = contacts.filter(c => {
@@ -750,23 +803,43 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
       {showImport && <CSVImportModal onClose={() => setShowImport(false)} contactsCol={contactsCol} />}
       {showModal && (
         <Modal title={editing ? "Edit Contact" : "New Contact"} onClose={() => setShowModal(false)}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Full Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} required />
-            <Field label="Job Title" value={form.jobTitle || ""} onChange={v => setForm(f => ({ ...f, jobTitle: v }))} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <Field label="First Name" value={form.firstName || ""} onChange={v => setForm(f => ({ ...f, firstName: v }))} required />
+            <Field label="Middle Name" value={form.middleName || ""} onChange={v => setForm(f => ({ ...f, middleName: v }))} />
+            <Field label="Last Name" value={form.lastName || ""} onChange={v => setForm(f => ({ ...f, lastName: v }))} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="Company" value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} />
-            <Field label="Metro Area" value={form.metroArea || ""} onChange={v => setForm(f => ({ ...f, metroArea: v }))} placeholder="e.g. New York, Chicago" />
+            <Field label="Job Title" value={form.jobTitle || ""} onChange={v => setForm(f => ({ ...f, jobTitle: v }))} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="Email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} type="email" />
             <Field label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
           </div>
-          <Field label="Address" value={form.address || ""} onChange={v => setForm(f => ({ ...f, address: v }))} placeholder="Full address" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Metro Area" value={form.metroArea || ""} onChange={v => setForm(f => ({ ...f, metroArea: v }))} placeholder="e.g. New York, Chicago" />
+            <Field label="City" value={form.city || ""} onChange={v => setForm(f => ({ ...f, city: v }))} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <Field label="State" value={form.state || ""} onChange={v => setForm(f => ({ ...f, state: v }))} />
+            <Field label="Zip" value={form.zip || ""} onChange={v => setForm(f => ({ ...f, zip: v }))} />
+            <Field label="Country" value={form.country || ""} onChange={v => setForm(f => ({ ...f, country: v }))} />
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="Birthday" value={form.birthday || ""} onChange={v => setForm(f => ({ ...f, birthday: v }))} placeholder="MM/DD/YYYY" />
+            <Field label="Website" value={form.website || ""} onChange={v => setForm(f => ({ ...f, website: v }))} placeholder="https://" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Industry" value={form.industry || ""} onChange={v => setForm(f => ({ ...f, industry: v }))} />
             <Field label="School / University" value={form.school || ""} onChange={v => setForm(f => ({ ...f, school: v }))} />
           </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="LinkedIn" value={form.linkedIn || ""} onChange={v => setForm(f => ({ ...f, linkedIn: v }))} placeholder="linkedin.com/in/..." />
+            <Field label="B/D" value={form.bd || ""} onChange={v => setForm(f => ({ ...f, bd: v }))} />
+          </div>
+          <Field label="Investments" value={form.investments || ""} onChange={v => setForm(f => ({ ...f, investments: v }))} placeholder="e.g. Series A, Real Estate, Tech" />
+          <Field label="Platform Description" value={form.platformDescription || ""} onChange={v => setForm(f => ({ ...f, platformDescription: v }))} as="textarea" />
+          <Field label="Research Team" value={form.researchTeam || ""} onChange={v => setForm(f => ({ ...f, researchTeam: v }))} />
           <Field label="Connected / Introduced By" value={form.connectedVia || ""} onChange={v => setForm(f => ({ ...f, connectedVia: v }))} placeholder="e.g. Met at ProductCon, Intro via John Smith" />
           <Sel label="Status" value={form.status} onChange={v => setForm(f => ({ ...f, status: v }))} options={["prospect","active","customer","inactive"].map(s => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))} />
           <div style={{ marginBottom: 16 }}>
