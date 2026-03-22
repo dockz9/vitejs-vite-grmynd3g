@@ -571,6 +571,16 @@ function CSVImportModal({ onClose, contactsCol }) {
     return { headers, rows };
   }
 
+  const IMPORT_FIELDS = [
+    { key: "name", label: "Full Name" }, { key: "email", label: "Email" },
+    { key: "company", label: "Company" }, { key: "phone", label: "Phone" },
+    { key: "jobTitle", label: "Job Title" }, { key: "metroArea", label: "Metro Area" },
+    { key: "address", label: "Address" }, { key: "birthday", label: "Birthday" },
+    { key: "school", label: "School" }, { key: "backgroundInfo", label: "Background Info" },
+    { key: "connectedVia", label: "Connected / Introduced By" },
+    { key: "notes", label: "Notes" }, { key: "status", label: "Status" },
+  ];
+
   function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -579,13 +589,21 @@ function CSVImportModal({ onClose, contactsCol }) {
       const { headers, rows } = parseCSV(ev.target.result);
       const autoMap = {};
       headers.forEach(h => {
-        const lower = h.toLowerCase();
-        if (lower.includes("name") && !lower.includes("company")) autoMap.name = h;
+        const lower = h.toLowerCase().replace(/[\s_\-]/g, "");
+        if ((lower.includes("firstname") || lower.includes("fullname") || lower === "name") && !lower.includes("company")) autoMap.name = h;
+        else if (lower.includes("lastname") && !autoMap.name) autoMap.name = h;
         if (lower.includes("email")) autoMap.email = h;
-        if (lower.includes("company") || lower.includes("org")) autoMap.company = h;
-        if (lower.includes("phone") || lower.includes("mobile")) autoMap.phone = h;
+        if (lower.includes("company") || lower.includes("organization") || lower.includes("employer")) autoMap.company = h;
+        if (lower.includes("phone") || lower.includes("mobile") || lower.includes("cell")) autoMap.phone = h;
+        if (lower.includes("jobtitle") || lower.includes("title") || lower.includes("position") || lower.includes("role")) autoMap.jobTitle = h;
+        if (lower.includes("metro") || lower.includes("city") || lower.includes("region") || lower.includes("location")) autoMap.metroArea = h;
+        if (lower.includes("address") || lower.includes("street")) autoMap.address = h;
+        if (lower.includes("birthday") || lower.includes("birthdate") || lower.includes("dob")) autoMap.birthday = h;
+        if (lower.includes("school") || lower.includes("university") || lower.includes("college") || lower.includes("education")) autoMap.school = h;
+        if (lower.includes("background") || lower.includes("bio") || lower.includes("about")) autoMap.backgroundInfo = h;
+        if (lower.includes("connected") || lower.includes("introduced") || lower.includes("referral") || lower.includes("source")) autoMap.connectedVia = h;
         if (lower.includes("note")) autoMap.notes = h;
-        if (lower.includes("status")) autoMap.status = h;
+        if (lower.includes("status") || lower.includes("stage") || lower.includes("type")) autoMap.status = h;
       });
       setPreview({ headers, rows: rows.slice(0, 3), allRows: rows });
       setMapping(autoMap);
@@ -596,7 +614,15 @@ function CSVImportModal({ onClose, contactsCol }) {
   async function doImport() {
     setImporting(true);
     for (const row of preview.allRows) {
-      const contact = { name: row[mapping.name] || "", email: row[mapping.email] || "", company: row[mapping.company] || "", phone: row[mapping.phone] || "", notes: row[mapping.notes] || "", status: row[mapping.status] || "prospect", tags: [], importedAt: new Date().toISOString() };
+      const contact = {
+        name: row[mapping.name] || "", email: row[mapping.email] || "",
+        company: row[mapping.company] || "", phone: row[mapping.phone] || "",
+        jobTitle: row[mapping.jobTitle] || "", metroArea: row[mapping.metroArea] || "",
+        address: row[mapping.address] || "", birthday: row[mapping.birthday] || "",
+        school: row[mapping.school] || "", backgroundInfo: row[mapping.backgroundInfo] || "",
+        connectedVia: row[mapping.connectedVia] || "", notes: row[mapping.notes] || "",
+        status: row[mapping.status] || "prospect", tags: [], importedAt: new Date().toISOString(),
+      };
       if (contact.name || contact.email) await contactsCol.add(contact);
     }
     setImporting(false); setDone(true);
@@ -624,10 +650,10 @@ function CSVImportModal({ onClose, contactsCol }) {
         <div>
           <p style={{ color: "#888", fontSize: 13, marginBottom: 16 }}>Found {preview.allRows.length} contacts. Map your columns:</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-            {["name","email","company","phone","notes","status"].map(field => (
-              <div key={field}>
-                <label style={{ display: "block", marginBottom: 4, fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em" }}>{field}</label>
-                <select value={mapping[field] || ""} onChange={e => setMapping(m => ({ ...m, [field]: e.target.value }))} style={{ width: "100%", background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 12px", color: "#e0e0ff", fontSize: 13, fontFamily: "inherit", outline: "none" }}>
+            {IMPORT_FIELDS.map(field => (
+              <div key={field.key}>
+                <label style={{ display: "block", marginBottom: 4, fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em" }}>{field.label}</label>
+                <select value={mapping[field.key] || ""} onChange={e => setMapping(m => ({ ...m, [field.key]: e.target.value }))} style={{ width: "100%", background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 12px", color: "#e0e0ff", fontSize: 13, fontFamily: "inherit", outline: "none" }}>
                   <option value="">-- skip --</option>
                   {preview.headers.map(h => <option key={h} value={h}>{h}</option>)}
                 </select>
@@ -652,7 +678,7 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState(null);
-  const blank = { name: "", company: "", email: "", phone: "", status: "prospect", tags: "", notes: "" };
+  const blank = { name: "", company: "", email: "", phone: "", jobTitle: "", metroArea: "", address: "", birthday: "", school: "", backgroundInfo: "", connectedVia: "", status: "prospect", tags: "", notes: "" };
   const [form, setForm] = useState(blank);
 
   const filtered = contacts.filter(c => {
@@ -705,7 +731,7 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
                   <StatusBadge status={c.status} />
                   {cGroups.map(g => <Tag key={g.id} color={g.color || "#6366f1"}>{g.name}</Tag>)}
                 </div>
-                <div style={{ fontSize: 13, color: "#888", marginBottom: 8 }}>{c.company} · {c.email}</div>
+                <div style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>{c.jobTitle ? `${c.jobTitle} · ` : ""}{c.company} · {c.email}{c.metroArea ? ` · ${c.metroArea}` : ""}</div>
                 <HealthBar score={health.score} color={health.color} label={health.label} size="sm" />
               </div>
               <div style={{ display: "flex", gap: 20, color: "#666", fontSize: 12, textAlign: "center" }}>
@@ -724,10 +750,24 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
       {showImport && <CSVImportModal onClose={() => setShowImport(false)} contactsCol={contactsCol} />}
       {showModal && (
         <Modal title={editing ? "Edit Contact" : "New Contact"} onClose={() => setShowModal(false)}>
-          <Field label="Full Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} required />
-          <Field label="Company" value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} />
-          <Field label="Email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} type="email" />
-          <Field label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Full Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} required />
+            <Field label="Job Title" value={form.jobTitle || ""} onChange={v => setForm(f => ({ ...f, jobTitle: v }))} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Company" value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} />
+            <Field label="Metro Area" value={form.metroArea || ""} onChange={v => setForm(f => ({ ...f, metroArea: v }))} placeholder="e.g. New York, Chicago" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} type="email" />
+            <Field label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
+          </div>
+          <Field label="Address" value={form.address || ""} onChange={v => setForm(f => ({ ...f, address: v }))} placeholder="Full address" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Birthday" value={form.birthday || ""} onChange={v => setForm(f => ({ ...f, birthday: v }))} placeholder="MM/DD/YYYY" />
+            <Field label="School / University" value={form.school || ""} onChange={v => setForm(f => ({ ...f, school: v }))} />
+          </div>
+          <Field label="Connected / Introduced By" value={form.connectedVia || ""} onChange={v => setForm(f => ({ ...f, connectedVia: v }))} placeholder="e.g. Met at ProductCon, Intro via John Smith" />
           <Sel label="Status" value={form.status} onChange={v => setForm(f => ({ ...f, status: v }))} options={["prospect","active","customer","inactive"].map(s => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))} />
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em" }}>Groups</label>
@@ -740,6 +780,7 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
             </div>
           </div>
           <Field label="Tags (comma-separated)" value={form.tags} onChange={v => setForm(f => ({ ...f, tags: v }))} placeholder="e.g. enterprise, warm lead" />
+          <Field label="Background Info" value={form.backgroundInfo || ""} onChange={v => setForm(f => ({ ...f, backgroundInfo: v }))} as="textarea" placeholder="Career history, interests, context…" />
           <Field label="Notes" value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} as="textarea" />
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <Btn variant="ghost" onClick={() => setShowModal(false)}>Cancel</Btn>
