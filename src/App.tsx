@@ -23,7 +23,7 @@ const GMAIL_CLIENT_ID = "597640152215-h9luh049s6ghd0ajhsljh2sioqo2dsbd.apps.goog
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── PASTE YOUR NEWS API KEY HERE (free at newsapi.org) ──────────────────────
-const NEWS_API_KEY = 52d60ad3da4143bdbe827547aa3d406e
+const NEWS_API_KEY = 52d60ad3da4143bdbe827547aa3d406e;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const app = initializeApp(firebaseConfig);
