@@ -1,9 +1,9 @@
 // @ts-nocheck
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore, collection, onSnapshot,
-  addDoc, updateDoc, deleteDoc, doc, setDoc
+  addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc
 } from "firebase/firestore";
 
 // ─── PASTE YOUR FIREBASE CONFIG HERE ─────────────────────────────────────────
@@ -15,6 +15,10 @@ const firebaseConfig = {
   messagingSenderId: "631776362334",
   appId: "1:631776362334:web:b886d3684885884d0259cf",
 };
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── PASTE YOUR GOOGLE OAUTH CLIENT ID HERE ───────────────────────────────────
+const GMAIL_CLIENT_ID = "597640152215-h9luh049s6ghd0ajhsljh2sioqo2dsbd.apps.googleusercontent.com";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const app = initializeApp(firebaseConfig);
@@ -39,6 +43,151 @@ function useCollection(name) {
   async function update(id, data) { await updateDoc(doc(db, name, id), data); }
   async function remove(id) { await deleteDoc(doc(db, name, id)); }
   return { docs, loading, add, update, remove };
+}
+
+// ─── GMAIL SYNC HOOK ──────────────────────────────────────────────────────────
+function useGmailSync(contacts, emailsCol) {
+  const [gmailToken, setGmailToken] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const [gmailConnected, setGmailConnected] = useState(false);
+
+  useEffect(() => {
+    // Load saved token from Firestore
+    async function loadToken() {
+      try {
+        const snap = await getDoc(doc(db, "settings", "gmail"));
+        if (snap.exists() && snap.data().access_token) {
+          setGmailToken(snap.data().access_token);
+          setGmailConnected(true);
+        }
+      } catch (e) {}
+    }
+    loadToken();
+  }, []);
+
+  function connectGmail() {
+    const params = new URLSearchParams({
+      client_id: GMAIL_CLIENT_ID,
+      redirect_uri: window.location.origin,
+      response_type: "token",
+      scope: "https://www.googleapis.com/auth/gmail.readonly",
+      prompt: "consent",
+    });
+    const popup = window.open(
+      `https://accounts.google.com/o/oauth2/v2/auth?${params}`,
+      "gmailAuth",
+      "width=500,height=600,left=200,top=100"
+    );
+
+    const interval = setInterval(async () => {
+      try {
+        if (popup.closed) { clearInterval(interval); return; }
+        const hash = popup.location.hash;
+        if (hash && hash.includes("access_token")) {
+          clearInterval(interval);
+          popup.close();
+          const tokenParams = new URLSearchParams(hash.slice(1));
+          const token = tokenParams.get("access_token");
+          setGmailToken(token);
+          setGmailConnected(true);
+          await setDoc(doc(db, "settings", "gmail"), { access_token: token, connected_at: new Date().toISOString() });
+        }
+      } catch (e) {}
+    }, 500);
+  }
+
+  async function syncEmails() {
+    if (!gmailToken || contacts.length === 0) return;
+    setSyncing(true);
+    try {
+      const contactEmails = contacts.map(c => c.email?.toLowerCase()).filter(Boolean);
+      const query = contactEmails.map(e => `from:${e} OR to:${e}`).join(" OR ");
+
+      // Fetch from inbox and sent
+      const [inboxRes, sentRes] = await Promise.all([
+        fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=30`, {
+          headers: { Authorization: `Bearer ${gmailToken}` }
+        }),
+        fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(`in:sent ${query}`)}&maxResults=30`, {
+          headers: { Authorization: `Bearer ${gmailToken}` }
+        }),
+      ]);
+
+      if (inboxRes.status === 401 || sentRes.status === 401) {
+        setGmailToken(null);
+        setGmailConnected(false);
+        await setDoc(doc(db, "settings", "gmail"), { access_token: null });
+        setSyncing(false);
+        return;
+      }
+
+      const inbox = await inboxRes.json();
+      const sent = await sentRes.json();
+
+      const allIds = [
+        ...(inbox.messages || []),
+        ...(sent.messages || []),
+      ];
+
+      // Get already synced IDs
+      const syncedIds = new Set(emailsCol.docs.filter(e => e.gmailId).map(e => e.gmailId));
+
+      let count = 0;
+      for (const msg of allIds) {
+        if (syncedIds.has(msg.id)) continue;
+
+        const detailRes = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
+          { headers: { Authorization: `Bearer ${gmailToken}` } }
+        );
+        const detail = await detailRes.json();
+        const headers = detail.payload?.headers || [];
+
+        const from = headers.find(h => h.name === "From")?.value || "";
+        const to = headers.find(h => h.name === "To")?.value || "";
+        const subject = headers.find(h => h.name === "Subject")?.value || "(no subject)";
+        const date = headers.find(h => h.name === "Date")?.value || "";
+
+        const fromEmail = from.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)?.[0]?.toLowerCase();
+        const toEmail = to.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)?.[0]?.toLowerCase();
+
+        const contact = contacts.find(c =>
+          c.email?.toLowerCase() === fromEmail || c.email?.toLowerCase() === toEmail
+        );
+        if (!contact) continue;
+
+        const direction = contactEmails.includes(fromEmail) ? "received" : "sent";
+
+        await emailsCol.add({
+          gmailId: msg.id,
+          contactId: contact.id,
+          subject,
+          body: "",
+          date: date ? new Date(date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+          direction,
+          status: "read",
+          autoSynced: true,
+        });
+        count++;
+      }
+
+      setLastSync(new Date());
+    } catch (e) {
+      console.error("Gmail sync error:", e);
+    }
+    setSyncing(false);
+  }
+
+  // Auto sync every 5 minutes when connected
+  useEffect(() => {
+    if (!gmailConnected || !gmailToken) return;
+    syncEmails();
+    const interval = setInterval(syncEmails, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [gmailConnected, gmailToken, contacts.length]);
+
+  return { gmailConnected, syncing, lastSync, connectGmail, syncEmails };
 }
 
 function Avatar({ name, size = 36 }) {
@@ -199,7 +348,7 @@ function ContactsTab({ contacts, emails, meetings }) {
 }
 
 // ─── EMAILS ──────────────────────────────────────────────────────────────────
-function EmailsTab({ emails, contacts }) {
+function EmailsTab({ emails, contacts, gmailConnected, syncing, lastSync, connectGmail, syncEmails }) {
   const col = useCollection("emails");
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ contactId: "", subject: "", body: "", direction: "sent" });
@@ -214,6 +363,23 @@ function EmailsTab({ emails, contacts }) {
 
   return (
     <div>
+      {/* Gmail sync banner */}
+      <div style={{ background: gmailConnected ? "#10b98115" : "#6366f115", border: `1px solid ${gmailConnected ? "#10b98130" : "#6366f130"}`, borderRadius: 12, padding: "14px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: gmailConnected ? "#10b981" : "#6366f1", marginBottom: 2 }}>
+            {gmailConnected ? "● Gmail Connected" : "Connect Gmail for Auto-Sync"}
+          </div>
+          <div style={{ fontSize: 12, color: "#666" }}>
+            {gmailConnected
+              ? `Emails auto-sync every 5 minutes${lastSync ? ` · Last sync: ${lastSync.toLocaleTimeString()}` : ""}`
+              : "Automatically log all emails to/from your contacts"}
+          </div>
+        </div>
+        {gmailConnected
+          ? <Btn size="sm" variant="ghost" onClick={syncEmails} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync Now"}</Btn>
+          : <Btn size="sm" onClick={connectGmail}>Connect Gmail</Btn>}
+      </div>
+
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 20 }}>
         <Btn onClick={openNew}>+ Log Email</Btn>
       </div>
@@ -227,16 +393,17 @@ function EmailsTab({ emails, contacts }) {
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{e.subject}</span>
                   <span style={{ fontSize: 11, padding: "2px 9px", borderRadius: 20, fontWeight: 600, background: e.direction === "sent" ? "#6366f120" : "#10b98120", color: e.direction === "sent" ? "#6366f1" : "#10b981", border: `1px solid ${e.direction === "sent" ? "#6366f140" : "#10b98140"}` }}>{e.direction}</span>
+                  {e.autoSynced && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: "#10b98110", color: "#10b981", border: "1px solid #10b98130" }}>gmail</span>}
                   <span style={{ fontSize: 11, color: "#555", marginLeft: "auto" }}>{e.date}</span>
                 </div>
                 <div style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>{contact ? `${contact.name} · ${contact.company}` : "Unknown"}</div>
-                <div style={{ fontSize: 13, color: "#666", fontStyle: "italic" }}>{(e.body || "").slice(0, 120)}{(e.body || "").length > 120 ? "…" : ""}</div>
+                {e.body && <div style={{ fontSize: 13, color: "#666", fontStyle: "italic" }}>{(e.body || "").slice(0, 120)}{(e.body || "").length > 120 ? "…" : ""}</div>}
               </div>
               <Btn size="sm" variant="danger" onClick={() => col.remove(e.id)}>×</Btn>
             </div>
           );
         })}
-        {sorted.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "60px 0", fontStyle: "italic" }}>No emails logged yet.</div>}
+        {sorted.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "60px 0", fontStyle: "italic" }}>No emails yet. Connect Gmail to auto-sync!</div>}
       </div>
       {showModal && (
         <Modal title="Log Email" onClose={() => setShowModal(false)}>
@@ -373,7 +540,6 @@ function OutreachTab({ contacts }) {
         <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>✦ AI Prospect Outreach</h3>
         <p style={{ margin: 0, fontSize: 13, color: "#888" }}>Generate personalized cold emails — logged to the cloud instantly.</p>
       </div>
-
       {prospects.length === 0
         ? <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}><div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>Add contacts with "prospect" status to get started.</div>
         : <div style={{ display: "grid", gap: 16 }}>
@@ -437,6 +603,7 @@ export default function CRM() {
   const contactsCol = useCollection("contacts");
   const emailsCol = useCollection("emails");
   const meetingsCol = useCollection("meetings");
+  const { gmailConnected, syncing, lastSync, connectGmail, syncEmails } = useGmailSync(contactsCol.docs, emailsCol);
 
   const loading = contactsCol.loading || emailsCol.loading || meetingsCol.loading;
 
@@ -459,19 +626,26 @@ export default function CRM() {
       <div style={{ minHeight: "100vh", background: "#080810", fontFamily: "'DM Mono', monospace", color: "#e0e0ff" }}>
         <div style={{ borderBottom: "1px solid #1a1a2a", padding: "18px 24px", display: "flex", alignItems: "center", gap: 16, background: "#0a0a12" }}>
           <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>◈</div>
-          <div>
+          <div style={{ flex: 1 }}>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18, color: "#f0f0ff", letterSpacing: "-0.02em" }}>Nucleus CRM</div>
             <div style={{ fontSize: 10, color: "#10b981", letterSpacing: "0.08em", textTransform: "uppercase" }}>● Live Cloud Sync</div>
+          </div>
+          <div style={{ fontSize: 12, color: gmailConnected ? "#10b981" : "#555" }}>
+            {gmailConnected ? "● Gmail Syncing" : "○ Gmail Not Connected"}
           </div>
         </div>
 
         <div style={{ padding: "24px", maxWidth: 1100, margin: "0 auto" }}>
           {firebaseConfig.apiKey === "PASTE_YOUR_API_KEY" && (
             <div style={{ background: "#f59e0b15", border: "1px solid #f59e0b40", borderRadius: 12, padding: "16px 20px", marginBottom: 24, fontSize: 13, color: "#f59e0b", lineHeight: 1.6 }}>
-              ⚠️ <strong>Setup required:</strong> Open this file in StackBlitz and replace the <code>firebaseConfig</code> values at the top with your Firebase project credentials. See the instructions in the chat.
+              ⚠️ <strong>Setup required:</strong> Replace the <code>firebaseConfig</code> values at the top of this file with your Firebase project credentials.
             </div>
           )}
-
+          {GMAIL_CLIENT_ID === "PASTE_YOUR_GMAIL_CLIENT_ID" && (
+            <div style={{ background: "#3b82f615", border: "1px solid #3b82f640", borderRadius: 12, padding: "16px 20px", marginBottom: 24, fontSize: 13, color: "#3b82f6", lineHeight: 1.6 }}>
+              ℹ️ <strong>Gmail sync:</strong> Replace <code>PASTE_YOUR_GMAIL_CLIENT_ID</code> at the top of this file with your Google OAuth Client ID to enable Gmail auto-sync.
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
             {stats.map(s => (
               <div key={s.label} style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: "16px 20px" }}>
@@ -480,7 +654,6 @@ export default function CRM() {
               </div>
             ))}
           </div>
-
           <div style={{ display: "flex", gap: 4, marginBottom: 24, background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 10, padding: 4 }}>
             {TABS.map(t => (
               <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: "9px 0", borderRadius: 8, border: "none", background: tab === t ? "#6366f1" : "transparent", color: tab === t ? "#fff" : "#666", fontWeight: 700, cursor: "pointer", fontFamily: "'Syne', sans-serif", fontSize: 13, transition: "all 0.15s" }}>
@@ -488,11 +661,10 @@ export default function CRM() {
               </button>
             ))}
           </div>
-
           <div style={{ animation: "fadeIn 0.2s ease" }} key={tab}>
             {loading ? <Spinner /> : <>
               {tab === "Contacts" && <ContactsTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} />}
-              {tab === "Emails" && <EmailsTab emails={emailsCol.docs} contacts={contactsCol.docs} />}
+              {tab === "Emails" && <EmailsTab emails={emailsCol.docs} contacts={contactsCol.docs} gmailConnected={gmailConnected} syncing={syncing} lastSync={lastSync} connectGmail={connectGmail} syncEmails={syncEmails} />}
               {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={contactsCol.docs} />}
               {tab === "Outreach" && <OutreachTab contacts={contactsCol.docs} />}
             </>}
