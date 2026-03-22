@@ -558,6 +558,7 @@ function CSVImportModal({ onClose, contactsCol }) {
   const [preview, setPreview] = useState(null);
   const [mapping, setMapping] = useState({});
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [done, setDone] = useState(false);
   const fileRef = useRef();
 
@@ -607,7 +608,7 @@ function CSVImportModal({ onClose, contactsCol }) {
         if (lower.includes("primaryphone") || lower === "phone" || lower.includes("mobile") || lower.includes("cell")) autoMap.phone = h;
         if (lower.includes("street1") || lower.includes("address1") || lower.includes("primarystreet1")) autoMap.street1 = h;
         if (lower.includes("street2") || lower.includes("address2") || lower.includes("primarystreet2")) autoMap.street2 = h;
-        if (lower.includes("primarycity") || lower === "city") autoMap.city = h;
+        if (lower.includes("primarycity") || lower === "city" || lower === "primarycity") autoMap.city = h;
         if (lower.includes("primarystate") || lower === "state") autoMap.state = h;
         if (lower.includes("primaryzip") || lower === "zip" || lower.includes("postal")) autoMap.zip = h;
         if (lower.includes("primarycountry") || lower === "country") autoMap.country = h;
@@ -636,47 +637,54 @@ function CSVImportModal({ onClose, contactsCol }) {
 
   async function doImport() {
     setImporting(true);
-    for (const row of preview.allRows) {
-      const firstName = row[mapping.firstName] || "";
-      const lastName = row[mapping.lastName] || "";
-      const middleName = row[mapping.middleName] || "";
-      const suffix = row[mapping.suffix] || "";
-      const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(" ");
-      const street1 = row[mapping.street1] || "";
-      const street2 = row[mapping.street2] || "";
-      const city = row[mapping.city] || "";
-      const state = row[mapping.state] || "";
-      const zip = row[mapping.zip] || "";
-      const country = row[mapping.country] || "";
-      const addressParts = [street1, street2, city, state, zip, country].filter(Boolean);
-      const contact = {
-        name: fullName,
-        firstName, middleName, lastName, suffix,
-        email: row[mapping.email] || "",
-        company: row[mapping.company] || "",
-        phone: row[mapping.phone] || "",
-        address: addressParts.join(", "),
-        street1, street2, city, state, zip, country,
-        website: row[mapping.website] || "",
-        jobTitle: row[mapping.jobTitle] || "",
-        birthday: row[mapping.birthday] || "",
-        backgroundInfo: row[mapping.backgroundInfo] || "",
-        industry: row[mapping.industry] || "",
-        investments: row[mapping.investments] || "",
-        linkedIn: row[mapping.linkedIn] || "",
-        school: row[mapping.school] || "",
-        connectedVia: row[mapping.connectedVia] || "",
-        platformDescription: row[mapping.platformDescription] || "",
-        researchTeam: row[mapping.researchTeam] || "",
-        metroArea: row[mapping.metroArea] || city || "",
-        bd: row[mapping.bd] || "",
-        importGroups: row[mapping.importGroups] || "",
-        notes: row[mapping.notes] || "",
-        status: row[mapping.status] || "prospect",
-        tags: [],
-        importedAt: new Date().toISOString(),
-      };
-      if (contact.name || contact.email) await contactsCol.add(contact);
+    const BATCH_SIZE = 20;
+    const rows = preview.allRows;
+    let imported = 0;
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async row => {
+        const firstName = row[mapping.firstName] || "";
+        const middleName = row[mapping.middleName] || "";
+        const lastName = row[mapping.lastName] || "";
+        const suffix = row[mapping.suffix] || "";
+        const displayName = [firstName, middleName, lastName, suffix].filter(Boolean).join(" ");
+        const city = row[mapping.city] || "";
+        const contact = {
+          name: displayName,
+          firstName, middleName, lastName, suffix,
+          email: row[mapping.email] || "",
+          company: row[mapping.company] || "",
+          phone: row[mapping.phone] || "",
+          primaryStreet1: row[mapping.street1] || "",
+          primaryStreet2: row[mapping.street2] || "",
+          primaryCity: city,
+          primaryState: row[mapping.state] || "",
+          primaryZip: row[mapping.zip] || "",
+          primaryCountry: row[mapping.country] || "",
+          website: row[mapping.website] || "",
+          jobTitle: row[mapping.jobTitle] || "",
+          birthday: row[mapping.birthday] || "",
+          backgroundInfo: row[mapping.backgroundInfo] || "",
+          industry: row[mapping.industry] || "",
+          investments: row[mapping.investments] || "",
+          linkedIn: row[mapping.linkedIn] || "",
+          school: row[mapping.school] || "",
+          connectedVia: row[mapping.connectedVia] || "",
+          platformDescription: row[mapping.platformDescription] || "",
+          researchTeam: row[mapping.researchTeam] || "",
+          metroArea: row[mapping.metroArea] || city || "",
+          bd: row[mapping.bd] || "",
+          importGroups: row[mapping.importGroups] || "",
+          notes: row[mapping.notes] || "",
+          status: row[mapping.status] || "prospect",
+          tags: [],
+          importedAt: new Date().toISOString(),
+        };
+        if (contact.name || contact.email) await contactsCol.add(contact);
+      }));
+      imported += batch.length;
+      setImportProgress(Math.round((imported / rows.length) * 100));
+      await new Promise(r => setTimeout(r, 100));
     }
     setImporting(false); setDone(true);
   }
@@ -713,9 +721,17 @@ function CSVImportModal({ onClose, contactsCol }) {
               </div>
             ))}
           </div>
+          {importing && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>Importing… {importProgress}% ({Math.round(preview.allRows.length * importProgress / 100)} of {preview.allRows.length})</div>
+              <div style={{ height: 6, background: "#1e1e2e", borderRadius: 10, overflow: "hidden" }}>
+                <div style={{ width: `${importProgress}%`, height: "100%", background: "#6366f1", borderRadius: 10, transition: "width 0.3s ease" }} />
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-            <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={doImport} disabled={importing || !mapping.name}>{importing ? "Importing…" : `Import ${preview.allRows.length} Contacts`}</Btn>
+            <Btn variant="ghost" onClick={onClose} disabled={importing}>Cancel</Btn>
+            <Btn onClick={doImport} disabled={importing || !mapping.name}>{importing ? `Importing ${importProgress}%…` : `Import ${preview.allRows.length} Contacts`}</Btn>
           </div>
         </div>
       )}
@@ -731,7 +747,7 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState(null);
-  const blank = { name: "", firstName: "", lastName: "", company: "", email: "", phone: "", jobTitle: "", metroArea: "", address: "", city: "", state: "", zip: "", country: "", website: "", birthday: "", school: "", backgroundInfo: "", industry: "", investments: "", linkedIn: "", connectedVia: "", platformDescription: "", researchTeam: "", bd: "", status: "prospect", tags: "", notes: "" };
+  const blank = { name: "", firstName: "", middleName: "", lastName: "", suffix: "", company: "", email: "", phone: "", jobTitle: "", metroArea: "", primaryStreet1: "", primaryStreet2: "", primaryCity: "", primaryState: "", primaryZip: "", primaryCountry: "", website: "", birthday: "", school: "", backgroundInfo: "", industry: "", investments: "", linkedIn: "", connectedVia: "", platformDescription: "", researchTeam: "", bd: "", status: "prospect", tags: "", notes: "" };
   const [form, setForm] = useState(blank);
 
   const filtered = contacts.filter(c => {
@@ -765,6 +781,14 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
         </select>
         <Btn variant="ghost" onClick={() => setShowImport(true)}>⬆ Import CSV</Btn>
         <Btn onClick={openNew}>+ New Contact</Btn>
+        {contacts.length > 0 && <Btn variant="danger" onClick={async () => {
+          if (!window.confirm(`Delete ALL ${contacts.length} contacts? This cannot be undone.`)) return;
+          const BATCH = 50;
+          for (let i = 0; i < contacts.length; i += BATCH) {
+            await Promise.all(contacts.slice(i, i + BATCH).map(c => contactsCol.remove(c.id)));
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }}>🗑 Delete All ({contacts.length})</Btn>}
       </div>
       <div style={{ color: "#555", fontSize: 12, marginBottom: 12 }}>{filtered.length} contacts</div>
       <div style={{ display: "grid", gap: 12 }}>
@@ -784,7 +808,7 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
                   <StatusBadge status={c.status} />
                   {cGroups.map(g => <Tag key={g.id} color={g.color || "#6366f1"}>{g.name}</Tag>)}
                 </div>
-                <div style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>{c.jobTitle ? `${c.jobTitle} · ` : ""}{c.company} · {c.email}{c.metroArea ? ` · ${c.metroArea}` : ""}</div>
+                <div style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>{c.jobTitle ? `${c.jobTitle} · ` : ""}{c.company} · {c.email}{c.primaryCity ? ` · ${c.primaryCity}` : c.metroArea ? ` · ${c.metroArea}` : ""}</div>
                 <HealthBar score={health.score} color={health.color} label={health.label} size="sm" />
               </div>
               <div style={{ display: "flex", gap: 20, color: "#666", fontSize: 12, textAlign: "center" }}>
@@ -816,14 +840,16 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
             <Field label="Email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} type="email" />
             <Field label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
           </div>
+          <Field label="Primary Street 1" value={form.primaryStreet1 || ""} onChange={v => setForm(f => ({ ...f, primaryStreet1: v }))} />
+          <Field label="Primary Street 2" value={form.primaryStreet2 || ""} onChange={v => setForm(f => ({ ...f, primaryStreet2: v }))} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Primary City" value={form.primaryCity || ""} onChange={v => setForm(f => ({ ...f, primaryCity: v }))} />
             <Field label="Metro Area" value={form.metroArea || ""} onChange={v => setForm(f => ({ ...f, metroArea: v }))} placeholder="e.g. New York, Chicago" />
-            <Field label="City" value={form.city || ""} onChange={v => setForm(f => ({ ...f, city: v }))} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            <Field label="State" value={form.state || ""} onChange={v => setForm(f => ({ ...f, state: v }))} />
-            <Field label="Zip" value={form.zip || ""} onChange={v => setForm(f => ({ ...f, zip: v }))} />
-            <Field label="Country" value={form.country || ""} onChange={v => setForm(f => ({ ...f, country: v }))} />
+            <Field label="Primary State" value={form.primaryState || ""} onChange={v => setForm(f => ({ ...f, primaryState: v }))} />
+            <Field label="Primary Zip" value={form.primaryZip || ""} onChange={v => setForm(f => ({ ...f, primaryZip: v }))} />
+            <Field label="Primary Country" value={form.primaryCountry || ""} onChange={v => setForm(f => ({ ...f, primaryCountry: v }))} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="Birthday" value={form.birthday || ""} onChange={v => setForm(f => ({ ...f, birthday: v }))} placeholder="MM/DD/YYYY" />
