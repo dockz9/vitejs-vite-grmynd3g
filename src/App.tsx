@@ -567,7 +567,7 @@ function CSVImportModal({ onClose, contactsCol }) {
     const firstLine = lines[0];
     const delimiter = firstLine.includes("\t") ? "\t" : ",";
     function splitLine(line) {
-      if (delimiter === "\t") return line.split("\t").map(v => v.trim().replace(/^"|"$/g, ""));
+      if (delimiter === "\t") return line.split("\t").map(v => v.trim().replace(/^"|"$/g, "").replace(/#REF!/g, "").replace(/#N\/A/g, "").replace(/#VALUE!/g, ""));
       const result = [];
       let cur = "", inQuote = false;
       for (let i = 0; i < line.length; i++) {
@@ -579,12 +579,31 @@ function CSVImportModal({ onClose, contactsCol }) {
       result.push(cur.trim());
       return result;
     }
-    const headers = splitLine(firstLine);
+    // Handle duplicate headers by making them unique
+    const rawHeaders = splitLine(firstLine);
+    const headerCount = {};
+    const headers = rawHeaders.map(h => {
+      if (!h) return null; // skip blank headers
+      if (headerCount[h] !== undefined) {
+        headerCount[h]++;
+        return `${h}_${headerCount[h]}`;
+      }
+      headerCount[h] = 0;
+      return h;
+    });
     const rows = lines.slice(1).filter(l => l.trim()).map(line => {
       const vals = splitLine(line);
-      return headers.reduce((obj, h, i) => ({ ...obj, [h]: vals[i] || "" }), {});
+      const row = {};
+      headers.forEach((h, i) => {
+        if (h) row[h] = (vals[i] || "").replace(/#REF!/g, "").replace(/#N\/A/g, "").replace(/#VALUE!/g, "").trim();
+      });
+      return row;
+    }).filter(row => {
+      // Skip rows where ALL meaningful fields are empty
+      const meaningful = ["First Name","Last Name","Full Name","Primary Email","Company Name"];
+      return meaningful.some(f => row[f] && row[f].trim());
     });
-    return { headers, rows };
+    return { headers: headers.filter(Boolean), rows };
   }
 
   const IMPORT_FIELDS = [
