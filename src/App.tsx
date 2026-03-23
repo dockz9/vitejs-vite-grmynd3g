@@ -30,7 +30,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-const TABS = ["Dashboard", "Contacts", "Groups", "Emails", "Meetings", "Pipeline", "Pitchdecks", "News", "Outreach"];
+const TABS = ["Dashboard", "Contacts", "Companies", "Groups", "Emails", "Meetings", "Pipeline", "Pitchdecks", "News", "Outreach"];
 const STATUS_COLORS = {
   prospect: "#f59e0b", active: "#10b981", inactive: "#6b7280", customer: "#3b82f6",
 };
@@ -760,24 +760,126 @@ function CSVImportModal({ onClose, contactsCol }) {
   );
 }
 
+// ─── CONTACT DETAIL MODAL ────────────────────────────────────────────────────
+function ContactDetailModal({ contact, onClose, onEdit, emails, meetings }) {
+  const cEmails = emails.filter(e => e.contactId === contact.id).sort((a,b) => (b.date||"").localeCompare(a.date||""));
+  const cMeetings = meetings.filter(m => m.contactId === contact.id).sort((a,b) => (b.date||"").localeCompare(a.date||""));
+  const Row = ({ label, value }) => value ? (
+    <div style={{ display: "flex", gap: 12, padding: "8px 0", borderBottom: "1px solid #1a1a2a" }}>
+      <div style={{ width: 140, fontSize: 11, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", flexShrink: 0 }}>{label}</div>
+      <div style={{ fontSize: 13, color: "#ccc", wordBreak: "break-word" }}>{value}</div>
+    </div>
+  ) : null;
+  return (
+    <Modal title={contact.name || "Contact"} onClose={onClose} wide>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+            <Avatar name={contact.name || "?"} size={56} />
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{contact.name}</div>
+              <div style={{ fontSize: 13, color: "#888" }}>{contact.jobTitle}{contact.jobTitle && contact.company ? " · " : ""}{contact.company}</div>
+              <StatusBadge status={contact.status} />
+            </div>
+          </div>
+          <Row label="First Name" value={contact.firstName} />
+          <Row label="Middle Name" value={contact.middleName} />
+          <Row label="Last Name" value={contact.lastName} />
+          <Row label="Suffix" value={contact.suffix} />
+          <Row label="Email" value={contact.email} />
+          <Row label="Phone" value={contact.phone} />
+          <Row label="Company" value={contact.company} />
+          <Row label="Job Title" value={contact.jobTitle} />
+          <Row label="Industry" value={contact.industry} />
+          <Row label="Metro Area" value={contact.metroArea} />
+          <Row label="City" value={contact.primaryCity} />
+          <Row label="State" value={contact.primaryState} />
+          <Row label="Zip" value={contact.primaryZip} />
+          <Row label="Country" value={contact.primaryCountry} />
+          <Row label="Street 1" value={contact.primaryStreet1} />
+          <Row label="Street 2" value={contact.primaryStreet2} />
+          <Row label="Website" value={contact.website} />
+          <Row label="LinkedIn" value={contact.linkedIn} />
+          <Row label="Birthday" value={contact.birthday} />
+          <Row label="School" value={contact.school} />
+          <Row label="B/D" value={contact.bd} />
+          <Row label="Investments" value={contact.investments} />
+          <Row label="Research Team" value={contact.researchTeam} />
+          <Row label="Connected Via" value={contact.connectedVia} />
+          <Row label="Groups" value={contact.importGroups} />
+          <Row label="Platform" value={contact.platformDescription} />
+          <Row label="Background" value={contact.backgroundInfo} />
+          <Row label="Notes" value={contact.notes} />
+        </div>
+        <div>
+          <div style={{ fontWeight: 700, color: "#9999cc", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>Recent Emails ({cEmails.length})</div>
+          <div style={{ display: "grid", gap: 8, marginBottom: 24 }}>
+            {cEmails.slice(0,5).map(e => (
+              <div key={e.id} style={{ background: "#080810", borderRadius: 8, padding: "8px 12px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{e.subject}</div>
+                <div style={{ fontSize: 11, color: "#555" }}>{e.direction} · {e.date}</div>
+              </div>
+            ))}
+            {cEmails.length === 0 && <div style={{ fontSize: 12, color: "#444", fontStyle: "italic" }}>No emails yet</div>}
+          </div>
+          <div style={{ fontWeight: 700, color: "#9999cc", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>Meetings ({cMeetings.length})</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {cMeetings.slice(0,5).map(m => (
+              <div key={m.id} style={{ background: "#080810", borderRadius: 8, padding: "8px 12px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{m.title}</div>
+                <div style={{ fontSize: 11, color: "#555" }}>{m.date} · {m.time}</div>
+              </div>
+            ))}
+            {cMeetings.length === 0 && <div style={{ fontSize: 12, color: "#444", fontStyle: "italic" }}>No meetings yet</div>}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 24 }}>
+        <Btn variant="ghost" onClick={onClose}>Close</Btn>
+        <Btn onClick={() => { onClose(); onEdit(contact); }}>Edit Contact</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── CONTACTS TAB ─────────────────────────────────────────────────────────────
 function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [importGroupFilter, setImportGroupFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showDetail, setShowDetail] = useState(null);
   const [editing, setEditing] = useState(null);
   const blank = { name: "", firstName: "", middleName: "", lastName: "", suffix: "", company: "", email: "", phone: "", jobTitle: "", metroArea: "", primaryStreet1: "", primaryStreet2: "", primaryCity: "", primaryState: "", primaryZip: "", primaryCountry: "", website: "", birthday: "", school: "", backgroundInfo: "", industry: "", investments: "", linkedIn: "", connectedVia: "", platformDescription: "", researchTeam: "", bd: "", status: "prospect", tags: "", notes: "" };
   const [form, setForm] = useState(blank);
 
+  // Get unique import groups for filter dropdown
+  const importGroups = [...new Set(contacts.map(c => c.importGroups).filter(Boolean))].sort();
+
   const filtered = contacts.filter(c => {
     const q = search.toLowerCase();
-    const matchSearch = c.name?.toLowerCase().includes(q) || c.company?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q);
+    const matchSearch = c.name?.toLowerCase().includes(q) || c.company?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q) || c.firstName?.toLowerCase().includes(q) || c.lastName?.toLowerCase().includes(q);
     const matchFilter = filter === "all" || c.status === filter;
     const matchGroup = groupFilter === "all" || (c.groups || []).includes(groupFilter);
-    return matchSearch && matchFilter && matchGroup;
+    const matchImportGroup = importGroupFilter === "all" || c.importGroups === importGroupFilter;
+    return matchSearch && matchFilter && matchGroup && matchImportGroup;
+  }).sort((a, b) => {
+    let aVal = "", bVal = "";
+    if (sortBy === "name") { aVal = a.lastName || a.name || ""; bVal = b.lastName || b.name || ""; }
+    else if (sortBy === "company") { aVal = a.company || ""; bVal = b.company || ""; }
+    else if (sortBy === "status") { aVal = a.status || ""; bVal = b.status || ""; }
+    else if (sortBy === "health") { aVal = calcHealthScore(a, emails, meetings).score; bVal = calcHealthScore(b, emails, meetings).score; return sortDir === "asc" ? aVal - bVal : bVal - aVal; }
+    return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
   });
+
+  function toggleSort(field) {
+    if (sortBy === field) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortBy(field); setSortDir("asc"); }
+  }
 
   function openNew() { setForm(blank); setEditing(null); setShowModal(true); }
   function openEdit(c) { setForm({ ...c, tags: (c.tags || []).join(", ") }); setEditing(c); setShowModal(true); }
@@ -787,6 +889,11 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
     if (editing) await contactsCol.update(editing.id, data);
     else await contactsCol.add(data);
     setShowModal(false);
+  }
+
+  async function deleteContact(c) {
+    if (!window.confirm(`Delete ${c.name}? This cannot be undone.`)) return;
+    await contactsCol.remove(c.id);
   }
 
   return (
@@ -810,41 +917,60 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
             await new Promise(r => setTimeout(r, 200));
           }
         }}>🗑 Delete All ({contacts.length})</Btn>}
+        <div style={{ fontSize: 11, color: "#555", alignSelf: "center" }}>Double-click a contact to open</div>
       </div>
-      <div style={{ color: "#555", fontSize: 12, marginBottom: 12 }}>{filtered.length} contacts</div>
-      <div style={{ display: "grid", gap: 12 }}>
+      {/* Sort + filter bar */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "#555" }}>{filtered.length} contacts · Sort:</span>
+        {[["name","Name"],["company","Company"],["status","Status"],["health","Health"]].map(([field, label]) => (
+          <button key={field} onClick={() => toggleSort(field)} style={{ padding: "4px 12px", borderRadius: 20, border: `1px solid ${sortBy === field ? "#6366f1" : "#2a2a3a"}`, background: sortBy === field ? "#6366f120" : "transparent", color: sortBy === field ? "#6366f1" : "#666", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            {label} {sortBy === field ? (sortDir === "asc" ? "↑" : "↓") : ""}
+          </button>
+        ))}
+        {importGroups.length > 0 && (
+          <select value={importGroupFilter} onChange={e => setImportGroupFilter(e.target.value)} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "4px 10px", color: "#e0e0ff", fontSize: 12, fontFamily: "inherit", outline: "none" }}>
+            <option value="all">All Import Groups</option>
+            {importGroups.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gap: 10 }}>
         {filtered.map(c => {
           const health = calcHealthScore(c, emails, meetings);
           const cEmails = emails.filter(e => e.contactId === c.id).length;
           const cMeetings = meetings.filter(m => m.contactId === c.id).length;
           const cGroups = groups.filter(g => (c.groups || []).includes(g.id));
           return (
-            <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 12, padding: 20, display: "flex", alignItems: "center", gap: 16, transition: "border-color 0.15s" }}
+            <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 12, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16, transition: "border-color 0.15s", cursor: "pointer" }}
               onMouseEnter={e => e.currentTarget.style.borderColor = "#6366f1"}
-              onMouseLeave={e => e.currentTarget.style.borderColor = "#1e1e2e"}>
-              <Avatar name={c.name || "?"} size={44} />
+              onMouseLeave={e => e.currentTarget.style.borderColor = "#1e1e2e"}
+              onDoubleClick={() => setShowDetail(c)}>
+              <Avatar name={c.name || "?"} size={40} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 700, fontSize: 15, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{c.name}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{c.lastName ? `${c.lastName}, ${c.firstName || ""}${c.middleName ? " " + c.middleName : ""}` : c.name}</span>
                   <StatusBadge status={c.status} />
                   {cGroups.map(g => <Tag key={g.id} color={g.color || "#6366f1"}>{g.name}</Tag>)}
+                  {c.importGroups && <Tag color="#8b5cf6">{c.importGroups}</Tag>}
                 </div>
-                <div style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>{c.jobTitle ? `${c.jobTitle} · ` : ""}{c.company} · {c.email}{c.primaryCity ? ` · ${c.primaryCity}` : c.metroArea ? ` · ${c.metroArea}` : ""}</div>
+                <div style={{ fontSize: 12, color: "#888", marginBottom: 6 }}>{c.jobTitle ? `${c.jobTitle} · ` : ""}{c.company}{c.primaryCity ? ` · ${c.primaryCity}` : c.metroArea ? ` · ${c.metroArea}` : ""}{c.industry ? ` · ${c.industry}` : ""}</div>
                 <HealthBar score={health.score} color={health.color} label={health.label} size="sm" />
               </div>
-              <div style={{ display: "flex", gap: 20, color: "#666", fontSize: 12, textAlign: "center" }}>
-                <div><div style={{ fontSize: 18, fontWeight: 700, color: "#9999cc" }}>{cEmails}</div>emails</div>
-                <div><div style={{ fontSize: 18, fontWeight: 700, color: "#9999cc" }}>{cMeetings}</div>meetings</div>
+              <div style={{ display: "flex", gap: 16, color: "#666", fontSize: 11, textAlign: "center" }}>
+                <div><div style={{ fontSize: 16, fontWeight: 700, color: "#9999cc" }}>{cEmails}</div>emails</div>
+                <div><div style={{ fontSize: 16, fontWeight: 700, color: "#9999cc" }}>{cMeetings}</div>mtgs</div>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8 }} onClick={e => e.stopPropagation()}>
                 <Btn size="sm" variant="ghost" onClick={() => openEdit(c)}>Edit</Btn>
-                <Btn size="sm" variant="danger" onClick={() => contactsCol.remove(c.id)}>×</Btn>
+                <Btn size="sm" variant="danger" onClick={() => deleteContact(c)}>×</Btn>
               </div>
             </div>
           );
         })}
         {filtered.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "60px 0", fontStyle: "italic" }}>No contacts found.</div>}
       </div>
+      {showDetail && <ContactDetailModal contact={showDetail} onClose={() => setShowDetail(null)} onEdit={openEdit} emails={emails} meetings={meetings} />}
       {showImport && <CSVImportModal onClose={() => setShowImport(false)} contactsCol={contactsCol} />}
       {showModal && (
         <Modal title={editing ? "Edit Contact" : "New Contact"} onClose={() => setShowModal(false)}>
@@ -1124,6 +1250,86 @@ function MeetingsTab({ meetings, contacts, meetingsCol, calConnected, calSyncing
             <Btn onClick={save} disabled={!form.title || !form.date}>Schedule</Btn>
           </div>
         </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── COMPANIES TAB ───────────────────────────────────────────────────────────
+function CompaniesTab({ contacts, emails, meetings }) {
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+
+  const companies = Object.values(
+    contacts.filter(c => c.company).reduce((acc, c) => {
+      const key = c.company.trim();
+      if (!acc[key]) acc[key] = { name: key, contacts: [] };
+      acc[key].contacts.push(c);
+      return acc;
+    }, {})
+  ).filter(co => co.name.toLowerCase().includes(search.toLowerCase()))
+   .sort((a, b) => sortDir === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
+
+  const selectedCompany = companies.find(co => co.name === selected);
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20 }}>
+      <div>
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search companies…" style={{ flex: 1, background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 14px", color: "#e0e0ff", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+          <button onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 12px", color: "#888", cursor: "pointer", fontSize: 12 }}>A-Z {sortDir === "asc" ? "↑" : "↓"}</button>
+        </div>
+        <div style={{ fontSize: 12, color: "#555", marginBottom: 12 }}>{companies.length} companies</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {companies.map(co => (
+            <div key={co.name} onClick={() => setSelected(selected === co.name ? null : co.name)}
+              style={{ background: "#0d0d14", border: `1px solid ${selected === co.name ? "#6366f1" : "#1e1e2e"}`, borderRadius: 10, padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, transition: "all 0.15s" }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: "#6366f120", border: "1px solid #6366f130", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#6366f1", flexShrink: 0 }}>{co.name[0]}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13, fontFamily: "'Syne', sans-serif" }}>{co.name}</div>
+                <div style={{ fontSize: 11, color: "#666" }}>{co.contacts.length} contact{co.contacts.length !== 1 ? "s" : ""}</div>
+              </div>
+            </div>
+          ))}
+          {companies.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No companies found.</div>}
+        </div>
+      </div>
+
+      {selected && selectedCompany && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 10, background: "#6366f120", border: "1px solid #6366f130", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 700, color: "#6366f1" }}>{selectedCompany.name[0]}</div>
+            <div>
+              <div style={{ fontWeight: 800, color: "#f0f0ff", fontSize: 18, fontFamily: "'Syne', sans-serif" }}>{selectedCompany.name}</div>
+              <div style={{ fontSize: 12, color: "#666" }}>{selectedCompany.contacts.length} employees in CRM</div>
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {selectedCompany.contacts.sort((a,b) => (a.lastName||a.name||"").localeCompare(b.lastName||b.name||"")).map(c => {
+              const cEmails = emails.filter(e => e.contactId === c.id).length;
+              const cMeetings = meetings.filter(m => m.contactId === c.id).length;
+              const health = calcHealthScore(c, emails, meetings);
+              return (
+                <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 10, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+                  <Avatar name={c.name || "?"} size={36} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                      <span style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13 }}>{c.lastName ? `${c.lastName}, ${c.firstName||""}` : c.name}</span>
+                      <StatusBadge status={c.status} />
+                    </div>
+                    <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>{c.jobTitle}{c.jobTitle && c.email ? " · " : ""}{c.email}</div>
+                    <HealthBar score={health.score} color={health.color} label={health.label} size="sm" />
+                  </div>
+                  <div style={{ display: "flex", gap: 12, color: "#666", fontSize: 11, textAlign: "center" }}>
+                    <div><div style={{ fontSize: 14, fontWeight: 700, color: "#9999cc" }}>{cEmails}</div>emails</div>
+                    <div><div style={{ fontSize: 14, fontWeight: 700, color: "#9999cc" }}>{cMeetings}</div>mtgs</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1487,6 +1693,7 @@ export default function CRM() {
             {loading ? <Spinner /> : <>
               {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} emailsCol={emailsCol} />}
               {tab === "Contacts" && <ContactsTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} contactsCol={contactsCol} />}
+              {tab === "Companies" && <CompaniesTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} />}
               {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} />}
               {tab === "Emails" && <EmailsTab emails={emailsCol.docs} contacts={contactsCol.docs} emailsCol={emailsCol} gmailAccounts={gmailAccountsCol.docs} gmailAccountsCol={gmailAccountsCol} syncing={syncing} lastSync={lastSync} connectGmail={connectGmail} syncAll={syncAll} />}
               {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={contactsCol.docs} meetingsCol={meetingsCol} calConnected={calConnected} calSyncing={calSyncing} connectCalendar={connectCalendar} syncCalendar={syncCalendar} />}
