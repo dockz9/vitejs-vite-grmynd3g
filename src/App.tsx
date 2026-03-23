@@ -1044,58 +1044,121 @@ function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", description: "", color: "#6366f1" });
   const [selected, setSelected] = useState(null);
+  const [selectedType, setSelectedType] = useState(null); // "manual" or "imported"
+  const [search, setSearch] = useState("");
   const COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ef4444","#06b6d4"];
+
+  // Get all unique imported groups from contacts
+  const importedGroups = [...new Set(contacts.map(c => c.importGroups).filter(Boolean))].sort();
 
   function openNew() { setForm({ name: "", description: "", color: "#6366f1" }); setEditing(null); setShowModal(true); }
   function openEdit(g) { setForm(g); setEditing(g); setShowModal(true); }
   async function save() { if (editing) await groupsCol.update(editing.id, form); else await groupsCol.add(form); setShowModal(false); }
 
-  const selectedGroup = groups.find(g => g.id === selected);
-  const groupContacts = selected ? contacts.filter(c => (c.groups || []).includes(selected)) : [];
+  // Contacts for selected group
+  const selectedContacts = selected
+    ? selectedType === "manual"
+      ? contacts.filter(c => (c.groups || []).includes(selected))
+      : contacts.filter(c => c.importGroups === selected)
+    : [];
+
+  const selectedName = selected
+    ? selectedType === "manual"
+      ? groups.find(g => g.id === selected)?.name
+      : selected
+    : null;
+
+  const filteredManual = groups.filter(g => g.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredImported = importedGroups.filter(g => g.toLowerCase().includes(search.toLowerCase()));
+
+  function selectGroup(id, type) {
+    if (selected === id && selectedType === type) { setSelected(null); setSelectedType(null); }
+    else { setSelected(id); setSelectedType(type); }
+  }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: selected ? "300px 1fr" : "1fr", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20 }}>
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ color: "#9999cc", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>All Groups</h3>
-          <Btn size="sm" onClick={openNew}>+ New Group</Btn>
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search groups…" style={{ flex: 1, background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 14px", color: "#e0e0ff", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+          <Btn size="sm" onClick={openNew}>+ New</Btn>
         </div>
-        <div style={{ display: "grid", gap: 10 }}>
-          {groups.map(g => {
-            const count = contacts.filter(c => (c.groups || []).includes(g.id)).length;
-            return (
-              <div key={g.id} onClick={() => setSelected(selected === g.id ? null : g.id)} style={{ background: "#0d0d14", border: `1px solid ${selected === g.id ? g.color || "#6366f1" : "#1e1e2e"}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: g.color || "#6366f1", flexShrink: 0 }} />
-                  <div style={{ flex: 1 }}><div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 14 }}>{g.name}</div>{g.description && <div style={{ fontSize: 12, color: "#666" }}>{g.description}</div>}</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: g.color || "#6366f1", fontFamily: "'Syne', sans-serif" }}>{count}</div>
+
+        {/* Manual groups */}
+        {filteredManual.length > 0 && <>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Custom Groups</div>
+          <div style={{ display: "grid", gap: 8, marginBottom: 20 }}>
+            {filteredManual.map(g => {
+              const count = contacts.filter(c => (c.groups || []).includes(g.id)).length;
+              const isSelected = selected === g.id && selectedType === "manual";
+              return (
+                <div key={g.id} onClick={() => selectGroup(g.id, "manual")} style={{ background: "#0d0d14", border: `1px solid ${isSelected ? g.color || "#6366f1" : "#1e1e2e"}`, borderRadius: 10, padding: "12px 16px", cursor: "pointer", transition: "all 0.15s" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: g.color || "#6366f1", flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}><div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13 }}>{g.name}</div>{g.description && <div style={{ fontSize: 11, color: "#666" }}>{g.description}</div>}</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: g.color || "#6366f1", fontFamily: "'Syne', sans-serif" }}>{count}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <Btn size="sm" variant="ghost" onClick={e => { e.stopPropagation(); openEdit(g); }}>Edit</Btn>
+                    <Btn size="sm" variant="danger" onClick={e => { e.stopPropagation(); if(window.confirm(`Delete group "${g.name}"?`)) groupsCol.remove(g.id); }}>×</Btn>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                  <Btn size="sm" variant="ghost" onClick={e => { e.stopPropagation(); openEdit(g); }}>Edit</Btn>
-                  <Btn size="sm" variant="danger" onClick={e => { e.stopPropagation(); groupsCol.remove(g.id); }}>×</Btn>
+              );
+            })}
+          </div>
+        </>}
+
+        {/* Imported groups */}
+        {filteredImported.length > 0 && <>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#8b5cf6", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Imported Groups ({filteredImported.length})</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {filteredImported.map(g => {
+              const count = contacts.filter(c => c.importGroups === g).length;
+              const isSelected = selected === g && selectedType === "imported";
+              return (
+                <div key={g} onClick={() => selectGroup(g, "imported")} style={{ background: "#0d0d14", border: `1px solid ${isSelected ? "#8b5cf6" : "#1e1e2e"}`, borderRadius: 10, padding: "10px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "all 0.15s" }}>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#8b5cf6", flexShrink: 0 }} />
+                  <div style={{ flex: 1, fontWeight: 600, color: "#f0f0ff", fontSize: 13 }}>{g}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: "#8b5cf6", fontFamily: "'Syne', sans-serif" }}>{count}</div>
                 </div>
-              </div>
-            );
-          })}
-          {groups.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No groups yet.</div>}
-        </div>
+              );
+            })}
+          </div>
+        </>}
+
+        {filteredManual.length === 0 && filteredImported.length === 0 && (
+          <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No groups found.</div>
+        )}
       </div>
-      {selected && selectedGroup && (
+
+      {/* Right panel — group members */}
+      {selected && selectedName && (
         <div>
-          <h3 style={{ color: "#f0f0ff", fontSize: 16, fontWeight: 700, fontFamily: "'Syne', sans-serif", marginBottom: 16 }}>{selectedGroup.name} · {groupContacts.length} contacts</h3>
-          <div style={{ display: "grid", gap: 10 }}>
-            {groupContacts.map(c => (
-              <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 10, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-                <Avatar name={c.name || "?"} size={36} />
-                <div style={{ flex: 1 }}><div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 14 }}>{c.name}</div><div style={{ fontSize: 12, color: "#888" }}>{c.company} · {c.email}</div></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+            <div style={{ width: 12, height: 12, borderRadius: "50%", background: selectedType === "imported" ? "#8b5cf6" : (groups.find(g=>g.id===selected)?.color || "#6366f1") }} />
+            <h3 style={{ color: "#f0f0ff", fontSize: 16, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>{selectedName}</h3>
+            <span style={{ color: "#555", fontSize: 13 }}>· {selectedContacts.length} contacts</span>
+            {selectedType === "imported" && <Tag color="#8b5cf6">imported</Tag>}
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {selectedContacts.sort((a,b) => (a.lastName||a.name||"").localeCompare(b.lastName||b.name||"")).map(c => (
+              <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                <Avatar name={c.name || "?"} size={34} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13 }}>{c.lastName ? `${c.lastName}, ${c.firstName||""}` : c.name}</div>
+                  <div style={{ fontSize: 11, color: "#888" }}>{c.jobTitle ? `${c.jobTitle} · ` : ""}{c.company}{c.email ? ` · ${c.email}` : ""}</div>
+                </div>
                 <StatusBadge status={c.status} />
-                <Btn size="sm" variant="danger" onClick={() => contactsCol.update(c.id, { groups: (c.groups || []).filter(g => g !== selected) })}>Remove</Btn>
+                {selectedType === "manual" && (
+                  <Btn size="sm" variant="danger" onClick={() => contactsCol.update(c.id, { groups: (c.groups||[]).filter(g => g !== selected) })}>Remove</Btn>
+                )}
               </div>
             ))}
-            {groupContacts.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No contacts in this group.</div>}
+            {selectedContacts.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No contacts in this group.</div>}
           </div>
         </div>
       )}
+
       {showModal && (
         <Modal title={editing ? "Edit Group" : "New Group"} onClose={() => setShowModal(false)}>
           <Field label="Group Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} required />
