@@ -563,46 +563,77 @@ function CSVImportModal({ onClose, contactsCol }) {
   const fileRef = useRef();
 
   function parseCSV(text) {
-    const lines = text.trim().split("\n");
-    const firstLine = lines[0];
-    const delimiter = firstLine.includes("\t") ? "\t" : ",";
-    function splitLine(line) {
-      if (delimiter === "\t") return line.split("\t").map(v => v.trim().replace(/^"|"$/g, "").replace(/#REF!/g, "").replace(/#N\/A/g, "").replace(/#VALUE!/g, ""));
+    // Normalize line endings
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const isTab = normalized.split("\n")[0].includes("\t");
+    const delimiter = isTab ? "\t" : ",";
+
+    // For tab-delimited: handle multi-line quoted fields by reassembling
+    function parseAllRows(raw) {
       const result = [];
-      let cur = "", inQuote = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') { inQuote = !inQuote; }
-        else if (ch === "," && !inQuote) { result.push(cur.trim()); cur = ""; }
-        else { cur += ch; }
+      let current = "";
+      let inQuote = false;
+      for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+        if (ch === '"') {
+          inQuote = !inQuote;
+          current += ch;
+        } else if (ch === "\n" && !inQuote) {
+          result.push(current);
+          current = "";
+        } else {
+          current += ch;
+        }
       }
-      result.push(cur.trim());
+      if (current.trim()) result.push(current);
       return result;
     }
-    // Handle duplicate headers by making them unique
-    const rawHeaders = splitLine(firstLine);
+
+    function splitRow(line) {
+      const fields = [];
+      let cur = "";
+      let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+          else inQ = !inQ;
+        } else if (ch === delimiter && !inQ) {
+          fields.push(cur.replace(/#REF!/g,"").replace(/#N\/A/g,"").replace(/#VALUE!/g,"").trim());
+          cur = "";
+        } else {
+          cur += ch;
+        }
+      }
+      fields.push(cur.replace(/#REF!/g,"").replace(/#N\/A/g,"").replace(/#VALUE!/g,"").trim());
+      return fields;
+    }
+
+    const allRows = parseAllRows(normalized);
+    const rawHeaders = splitRow(allRows[0]);
+
+    // Deduplicate headers
     const headerCount = {};
     const headers = rawHeaders.map(h => {
-      if (!h) return null; // skip blank headers
-      if (headerCount[h] !== undefined) {
-        headerCount[h]++;
-        return `${h}_${headerCount[h]}`;
-      }
-      headerCount[h] = 0;
-      return h;
+      const key = h.trim();
+      if (!key) return null;
+      if (headerCount[key] !== undefined) { headerCount[key]++; return `${key}_${headerCount[key]}`; }
+      headerCount[key] = 0;
+      return key;
     });
-    const rows = lines.slice(1).filter(l => l.trim()).map(line => {
-      const vals = splitLine(line);
+
+    const rows = allRows.slice(1).map(line => {
+      if (!line.trim()) return null;
+      const vals = splitRow(line);
       const row = {};
-      headers.forEach((h, i) => {
-        if (h) row[h] = (vals[i] || "").replace(/#REF!/g, "").replace(/#N\/A/g, "").replace(/#VALUE!/g, "").trim();
-      });
+      headers.forEach((h, i) => { if (h) row[h] = (vals[i] || "").trim(); });
       return row;
     }).filter(row => {
-      // Skip rows where ALL meaningful fields are empty
+      if (!row) return false;
       const meaningful = ["First Name","Last Name","Full Name","Primary Email","Company Name"];
       return meaningful.some(f => row[f] && row[f].trim());
     });
+
     return { headers: headers.filter(Boolean), rows };
   }
 
