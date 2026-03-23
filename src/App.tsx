@@ -708,7 +708,7 @@ function CSVImportModal({ onClose, contactsCol }) {
 
   async function doImport() {
     setImporting(true);
-    const BATCH_SIZE = 20;
+    const BATCH_SIZE = 5;
     const rows = preview.allRows;
     let imported = 0;
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
@@ -755,7 +755,7 @@ function CSVImportModal({ onClose, contactsCol }) {
       }));
       imported += batch.length;
       setImportProgress(Math.round((imported / rows.length) * 100));
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 500));
     }
     setImporting(false); setDone(true);
   }
