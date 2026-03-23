@@ -246,8 +246,8 @@ function HealthBar({ score, color, label, size = "md" }) {
 
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ background: "#13131a", border: "1px solid #2a2a3a", borderRadius: 16, width: "100%", maxWidth: wide ? 800 : 560, maxHeight: "90vh", overflowY: "auto", padding: 32 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#13131a", border: "1px solid #2a2a3a", borderRadius: 16, width: "100%", maxWidth: wide ? 800 : 560, maxHeight: "90vh", overflowY: "auto", padding: 32 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{title}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#666", cursor: "pointer", fontSize: 22 }}>×</button>
