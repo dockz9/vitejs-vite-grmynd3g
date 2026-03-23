@@ -564,9 +564,24 @@ function CSVImportModal({ onClose, contactsCol }) {
 
   function parseCSV(text) {
     const lines = text.trim().split("\n");
-    const headers = lines[0].split(",").map(h => h.trim().replace(/"/g, ""));
-    const rows = lines.slice(1).map(line => {
-      const vals = line.split(",").map(v => v.trim().replace(/"/g, ""));
+    const firstLine = lines[0];
+    const delimiter = firstLine.includes("\t") ? "\t" : ",";
+    function splitLine(line) {
+      if (delimiter === "\t") return line.split("\t").map(v => v.trim().replace(/^"|"$/g, ""));
+      const result = [];
+      let cur = "", inQuote = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') { inQuote = !inQuote; }
+        else if (ch === "," && !inQuote) { result.push(cur.trim()); cur = ""; }
+        else { cur += ch; }
+      }
+      result.push(cur.trim());
+      return result;
+    }
+    const headers = splitLine(firstLine);
+    const rows = lines.slice(1).filter(l => l.trim()).map(line => {
+      const vals = splitLine(line);
       return headers.reduce((obj, h, i) => ({ ...obj, [h]: vals[i] || "" }), {});
     });
     return { headers, rows };
@@ -599,35 +614,41 @@ function CSVImportModal({ onClose, contactsCol }) {
       const autoMap = {};
       headers.forEach(h => {
         const lower = h.toLowerCase().replace(/[\s_\-]/g, "");
-        if (lower === "firstname" || lower === "first") autoMap.firstName = h;
-        if (lower === "middlename" || lower === "middle") autoMap.middleName = h;
-        if (lower === "lastname" || lower === "last") autoMap.lastName = h;
-        if (lower === "suffix") autoMap.suffix = h;
-        if (lower.includes("companyname") || lower === "company" || lower.includes("organization") || lower.includes("employer")) autoMap.company = h;
-        if (lower.includes("primaryemail") || lower === "email" || lower.includes("emailaddress")) autoMap.email = h;
-        if (lower.includes("primaryphone") || lower === "phone" || lower.includes("mobile") || lower.includes("cell")) autoMap.phone = h;
-        if (lower.includes("street1") || lower.includes("address1") || lower.includes("primarystreet1")) autoMap.street1 = h;
-        if (lower.includes("street2") || lower.includes("address2") || lower.includes("primarystreet2")) autoMap.street2 = h;
-        if (lower.includes("primarycity") || lower === "city" || lower === "primarycity") autoMap.city = h;
-        if (lower.includes("primarystate") || lower === "state") autoMap.state = h;
-        if (lower.includes("primaryzip") || lower === "zip" || lower.includes("postal")) autoMap.zip = h;
-        if (lower.includes("primarycountry") || lower === "country") autoMap.country = h;
-        if (lower.includes("website") || lower.includes("url")) autoMap.website = h;
-        if (lower.includes("jobtitle") || lower === "title" || lower.includes("position") || lower.includes("role")) autoMap.jobTitle = h;
-        if (lower.includes("birthday") || lower.includes("birthdate") || lower.includes("dob")) autoMap.birthday = h;
-        if (lower.includes("background") || lower.includes("bio") || lower.includes("about")) autoMap.backgroundInfo = h;
-        if (lower.includes("industry") || lower.includes("sector")) autoMap.industry = h;
-        if (lower.includes("investment")) autoMap.investments = h;
-        if (lower.includes("linkedin")) autoMap.linkedIn = h;
-        if (lower.includes("school") || lower.includes("university") || lower.includes("college") || lower.includes("education")) autoMap.school = h;
-        if (lower.includes("connected") || lower.includes("introduced") || lower.includes("referral")) autoMap.connectedVia = h;
-        if (lower.includes("platform") || lower.includes("description")) autoMap.platformDescription = h;
-        if (lower.includes("research") || lower.includes("team")) autoMap.researchTeam = h;
-        if (lower.includes("metro") || lower.includes("metroarea")) autoMap.metroArea = h;
-        if (lower === "bd" || lower.includes("b/d") || lower.includes("brokerdealer")) autoMap.bd = h;
-        if (lower.includes("group")) autoMap.importGroups = h;
-        if (lower.includes("note")) autoMap.notes = h;
-        if (lower.includes("status") || lower.includes("stage") || lower.includes("type")) autoMap.status = h;
+        const orig = h.trim();
+        if (orig === "First Name") autoMap.firstName = h;
+        else if (lower === "firstname" || lower === "first") autoMap.firstName = h;
+        if (orig === "Middle Name") autoMap.middleName = h;
+        else if (lower === "middlename" || lower === "middle") autoMap.middleName = h;
+        if (orig === "Last Name") autoMap.lastName = h;
+        else if (lower === "lastname" || lower === "last") autoMap.lastName = h;
+        if (orig === "Suffix" || lower === "suffix") autoMap.suffix = h;
+        if (orig === "Full Name") autoMap.name = h;
+        if (orig === "Company Name" || lower === "company" || lower.includes("organization")) autoMap.company = h;
+        if (orig === "Primary Email" || lower === "email" || lower.includes("emailaddress")) autoMap.email = h;
+        if (orig === "Primary Phone" || lower === "phone" || lower.includes("mobile")) autoMap.phone = h;
+        if (orig === "Primary Street 1" || lower.includes("street1") || lower.includes("primarystreet1")) autoMap.street1 = h;
+        if (orig === "Primary Street 2" || lower.includes("street2") || lower.includes("primarystreet2")) autoMap.street2 = h;
+        if (orig === "Primary City" || lower === "primarycity" || lower === "city") autoMap.city = h;
+        if (orig === "Primary State" || lower === "primarystate" || lower === "state") autoMap.state = h;
+        if (orig === "Primary Zip" || lower === "primaryzip" || lower === "zip" || lower.includes("postal")) autoMap.zip = h;
+        if (orig === "Primary Country" || lower === "primarycountry" || lower === "country") autoMap.country = h;
+        if (orig === "Primary Address") autoMap.fullAddress = h;
+        if (orig === "Website" || lower.includes("website") || lower.includes("url")) autoMap.website = h;
+        if (orig === "Job Title" || lower.includes("jobtitle") || lower === "title" || lower.includes("position")) autoMap.jobTitle = h;
+        if (orig === "Birthday" || lower.includes("birthday") || lower.includes("birthdate")) autoMap.birthday = h;
+        if (orig === "Background Info" || lower.includes("background") || lower.includes("bio")) autoMap.backgroundInfo = h;
+        if (orig === "Industry" && !autoMap.industry) autoMap.industry = h;
+        if (orig === "Investments" && !autoMap.investments) autoMap.investments = h;
+        if (orig === "LinkedIn Contacts" || lower.includes("linkedin")) autoMap.linkedIn = h;
+        if (orig === "School" || lower.includes("school") || lower.includes("university")) autoMap.school = h;
+        if (orig === "Connected/Introduced" || lower.includes("connected") || lower.includes("introduced")) autoMap.connectedVia = h;
+        if (orig === "Platform Desciption" || lower.includes("platform")) autoMap.platformDescription = h;
+        if (orig === "Research Team" || lower.includes("research")) autoMap.researchTeam = h;
+        if (orig === "Metro Area" || lower.includes("metro")) autoMap.metroArea = h;
+        if (orig === "B/D" || lower === "bd" || lower.includes("b/d")) autoMap.bd = h;
+        if (orig === "Groups - from import" || orig === "Groups" || lower.includes("group")) autoMap.importGroups = h;
+        if (orig === "Notes" || lower === "notes") autoMap.notes = h;
+        if (orig === "Status" || lower === "status") autoMap.status = h;
       });
       setPreview({ headers, rows: rows.slice(0, 3), allRows: rows });
       setMapping(autoMap);
