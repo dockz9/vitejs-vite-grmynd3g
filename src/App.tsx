@@ -909,6 +909,17 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
         </select>
         <Btn variant="ghost" onClick={() => setShowImport(true)}>⬆ Import CSV</Btn>
         <Btn onClick={openNew}>+ New Contact</Btn>
+        {contacts.some(c => c.importedAt && new Date(c.importedAt) > new Date(Date.now() - 60*60*1000)) && (
+          <Btn variant="yellow" onClick={async () => {
+            const recent = contacts.filter(c => c.importedAt && new Date(c.importedAt) > new Date(Date.now() - 60*60*1000));
+            if (!window.confirm(`Undo last import? This will delete ${recent.length} contacts imported in the last hour.`)) return;
+            const BATCH = 50;
+            for (let i = 0; i < recent.length; i += BATCH) {
+              await Promise.all(recent.slice(i, i + BATCH).map(c => contactsCol.remove(c.id)));
+              await new Promise(r => setTimeout(r, 200));
+            }
+          }}>↩ Undo Last Import</Btn>
+        )}
         {contacts.length > 0 && <Btn variant="danger" onClick={async () => {
           if (!window.confirm(`Delete ALL ${contacts.length} contacts? This cannot be undone.`)) return;
           const BATCH = 50;
