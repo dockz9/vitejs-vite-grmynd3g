@@ -1,9 +1,10 @@
 // @ts-nocheck
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore, collection, onSnapshot,
-  addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc
+  addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc,
+  query, orderBy, limit, startAfter, getDocs, getCountFromServer
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -36,6 +37,7 @@ const STATUS_COLORS = {
 };
 
 // ─── FIRESTORE HOOK ───────────────────────────────────────────────────────────
+// Simple hook for small collections (emails, meetings, groups etc)
 function useCollection(name) {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +52,86 @@ function useCollection(name) {
   async function update(id, data) { await updateDoc(doc(db, name, id), data); }
   async function remove(id) { await deleteDoc(doc(db, name, id)); }
   return { docs, loading, add, update, remove };
+}
+
+// Paginated hook for large collections like contacts
+const PAGE_SIZE = 50;
+function usePaginatedContacts() {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
+  const [cursors, setCursors] = useState([null]); // cursor stack per page
+  const [search, setSearchState] = useState("");
+  const searchTimeout = useRef(null);
+
+  // Get total count once
+  useEffect(() => {
+    getCountFromServer(collection(db, "contacts")).then(snap => {
+      setTotalCount(snap.data().count);
+    }).catch(() => {});
+  }, []);
+
+  // Load page
+  useEffect(() => {
+    setLoading(true);
+    let q;
+    if (search) {
+      // For search: load more docs and filter client-side
+      q = query(collection(db, "contacts"), orderBy("name"), limit(500));
+    } else {
+      const cursor = cursors[page];
+      q = cursor
+        ? query(collection(db, "contacts"), orderBy("name"), startAfter(cursor), limit(PAGE_SIZE))
+        : query(collection(db, "contacts"), orderBy("name"), limit(PAGE_SIZE));
+    }
+    getDocs(q).then(snap => {
+      let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (search) {
+        const q2 = search.toLowerCase();
+        results = results.filter(c =>
+          c.name?.toLowerCase().includes(q2) ||
+          c.firstName?.toLowerCase().includes(q2) ||
+          c.lastName?.toLowerCase().includes(q2) ||
+          c.company?.toLowerCase().includes(q2) ||
+          c.email?.toLowerCase().includes(q2)
+        );
+      }
+      setDocs(results);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [page, cursors, search]);
+
+  function nextPage(lastDoc) {
+    setCursors(c => { const n = [...c]; n[page + 1] = lastDoc; return n; });
+    setPage(p => p + 1);
+  }
+  function prevPage() { setPage(p => Math.max(0, p - 1)); }
+
+  function doSearch(val) {
+    clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(() => {
+      setSearchState(val);
+      setPage(0);
+      setCursors([null]);
+    }, 300);
+  }
+
+  async function add(data) { 
+    const ref = await addDoc(collection(db, "contacts"), data);
+    setTotalCount(c => c + 1);
+    return ref;
+  }
+  async function update(id, data) { await updateDoc(doc(db, "contacts", id), data); }
+  async function remove(id) { 
+    await deleteDoc(doc(db, "contacts", id));
+    setTotalCount(c => c - 1);
+    setDocs(d => d.filter(x => x.id !== id));
+  }
+
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+
+  return { docs, loading, totalCount, totalPages, page, nextPage, prevPage, add, update, remove, doSearch, search };
 }
 
 // ─── RELATIONSHIP HEALTH SCORE ────────────────────────────────────────────────
@@ -659,8 +741,10 @@ function CSVImportModal({ onClose, contactsCol }) {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
+    reader.onerror = () => alert("Error reading file. Please try again.");
     reader.onload = ev => {
-      const { headers, rows } = parseCSV(ev.target.result);
+      try {
+        const { headers, rows } = parseCSV(ev.target.result);
       const autoMap = {};
       headers.forEach(h => {
         const lower = h.toLowerCase().replace(/[\s_\-]/g, "");
@@ -696,18 +780,50 @@ function CSVImportModal({ onClose, contactsCol }) {
         if (orig === "Research Team" || lower.includes("research")) autoMap.researchTeam = h;
         if (orig === "Metro Area" || lower.includes("metro")) autoMap.metroArea = h;
         if (orig === "B/D" || lower === "bd" || lower.includes("b/d")) autoMap.bd = h;
-        if (orig === "Groups - from import" || orig === "Groups" || lower.includes("group")) autoMap.importGroups = h;
+        if (orig === "Groups - from import") autoMap.importGroups = h;
+        else if (orig === "Groups" || lower === "groups") autoMap.importGroups = h;
         if (orig === "Notes" || lower === "notes") autoMap.notes = h;
         if (orig === "Status" || lower === "status") autoMap.status = h;
+        if (orig === "All Email" || lower === "allemail") autoMap.allEmail = h;
+        if (orig === "All Phone" || lower === "allphone") autoMap.allPhone = h;
+        if (orig === "All Addresses" || lower === "alladdresses") autoMap.allAddresses = h;
+        if (orig === "Primary Type" || lower === "primarytype") autoMap.primaryType = h;
+        if (orig === "Company Street" || lower === "companystreet") autoMap.companyStreet = h;
+        if (orig === "Company City" || lower === "companycity") autoMap.companyCity = h;
+        if (orig === "Company State" || lower === "companystate") autoMap.companyState = h;
+        if (orig === "Company Zip" || lower === "companyzip") autoMap.companyZip = h;
+        if (orig === "Company Country" || lower === "companycountry") autoMap.companyCountry = h;
+        if (orig === "Creation Date" || lower === "creationdate") autoMap.creationDate = h;
+        if (orig === "Last Edited Date" || lower === "lastediteddate") autoMap.lastEditedDate = h;
+        if (orig === "Assigned To" || lower === "assignedto") autoMap.assignedTo = h;
+        if (orig === "Consultants" || lower === "consultants") autoMap.consultants = h;
+        if (orig === "Relationships" || lower === "relationships") autoMap.relationships = h;
+        if (orig === "Address 1 Street" || lower === "address1street" || lower === "addr1street") autoMap.addr1Street = h;
+        if (orig === "Address 1 City" || lower === "address1city" || lower === "addr1city") autoMap.addr1City = h;
+        if (orig === "Address 1 State" || lower === "address1state" || lower === "addr1state") autoMap.addr1State = h;
+        if (orig === "Address 1 Zip" || lower === "address1zip" || lower === "addr1zip") autoMap.addr1Zip = h;
+        if (orig === "Address 1 Country" || lower === "address1country" || lower === "addr1country") autoMap.addr1Country = h;
+        if (orig === "Address 1 Type" || lower === "address1type" || lower === "addr1type") autoMap.addr1Type = h;
+        if (orig === "Address 2 Street" || lower === "address2street" || lower === "addr2street") autoMap.addr2Street = h;
+        if (orig === "Address 2 City" || lower === "address2city" || lower === "addr2city") autoMap.addr2City = h;
+        if (orig === "Address 2 State" || lower === "address2state" || lower === "addr2state") autoMap.addr2State = h;
+        if (orig === "Address 2 Zip" || lower === "address2zip" || lower === "addr2zip") autoMap.addr2Zip = h;
+        if (orig === "Address 2 Country" || lower === "address2country" || lower === "addr2country") autoMap.addr2Country = h;
+        if (orig === "Address 2 Type" || lower === "address2type" || lower === "addr2type") autoMap.addr2Type = h;
       });
-      setPreview({ headers, rows: rows.slice(0, 3), allRows: rows });
-      setMapping(autoMap);
+        setPreview({ headers, rows: rows.slice(0, 3), allRows: rows });
+        setMapping(autoMap);
+      } catch(err) {
+        alert("Failed to parse file: " + err.message + "\n\nTry saving your Excel file as CSV UTF-8 format.");
+        console.error("Parse error:", err);
+      }
     };
-    reader.readAsText(file);
+    reader.readAsText(file, "UTF-8");
   }
 
   async function doImport() {
     setImporting(true);
+    setImportProgress(0);
     const BATCH_SIZE = 5;
     const rows = preview.allRows;
     let imported = 0;
@@ -723,19 +839,43 @@ function CSVImportModal({ onClose, contactsCol }) {
         const contact = {
           name: displayName,
           firstName, middleName, lastName, suffix,
-          email: row[mapping.email] || "",
+          email: row[mapping.email] || row[mapping.allEmail] || "",
+          allEmail: row[mapping.allEmail] || "",
           company: row[mapping.company] || "",
-          phone: row[mapping.phone] || "",
+          phone: row[mapping.phone] || row[mapping.allPhone] || "",
+          allPhone: row[mapping.allPhone] || "",
           primaryStreet1: row[mapping.street1] || "",
           primaryStreet2: row[mapping.street2] || "",
           primaryCity: city,
           primaryState: row[mapping.state] || "",
           primaryZip: row[mapping.zip] || "",
           primaryCountry: row[mapping.country] || "",
+          primaryType: row[mapping.primaryType] || "",
+          companyStreet: row[mapping.companyStreet] || "",
+          companyCity: row[mapping.companyCity] || "",
+          companyState: row[mapping.companyState] || "",
+          companyZip: row[mapping.companyZip] || "",
+          companyCountry: row[mapping.companyCountry] || "",
+          allAddresses: row[mapping.allAddresses] || "",
+          addr1Street: row[mapping.addr1Street] || "",
+          addr1City: row[mapping.addr1City] || "",
+          addr1State: row[mapping.addr1State] || "",
+          addr1Zip: row[mapping.addr1Zip] || "",
+          addr1Country: row[mapping.addr1Country] || "",
+          addr1Type: row[mapping.addr1Type] || "",
+          addr2Street: row[mapping.addr2Street] || "",
+          addr2City: row[mapping.addr2City] || "",
+          addr2State: row[mapping.addr2State] || "",
+          addr2Zip: row[mapping.addr2Zip] || "",
+          addr2Country: row[mapping.addr2Country] || "",
+          addr2Type: row[mapping.addr2Type] || "",
           website: row[mapping.website] || "",
           jobTitle: row[mapping.jobTitle] || "",
           birthday: row[mapping.birthday] || "",
           backgroundInfo: row[mapping.backgroundInfo] || "",
+          creationDate: row[mapping.creationDate] || "",
+          lastEditedDate: row[mapping.lastEditedDate] || "",
+          assignedTo: row[mapping.assignedTo] || "",
           industry: row[mapping.industry] || "",
           investments: row[mapping.investments] || "",
           linkedIn: row[mapping.linkedIn] || "",
@@ -745,7 +885,9 @@ function CSVImportModal({ onClose, contactsCol }) {
           researchTeam: row[mapping.researchTeam] || "",
           metroArea: row[mapping.metroArea] || city || "",
           bd: row[mapping.bd] || "",
+          consultants: row[mapping.consultants] || "",
           importGroups: row[mapping.importGroups] || "",
+          relationships: row[mapping.relationships] || "",
           notes: row[mapping.notes] || "",
           status: row[mapping.status] || "prospect",
           tags: [],
@@ -757,7 +899,8 @@ function CSVImportModal({ onClose, contactsCol }) {
       setImportProgress(Math.round((imported / rows.length) * 100));
       await new Promise(r => setTimeout(r, 500));
     }
-    setImporting(false); setDone(true);
+    setImporting(false);
+    setDone(true);
   }
 
   return (
@@ -857,7 +1000,14 @@ function ContactDetailModal({ contact, onClose, onEdit, emails, meetings }) {
           <Row label="Research Team" value={contact.researchTeam} />
           <Row label="Connected Via" value={contact.connectedVia} />
           <Row label="Groups" value={contact.importGroups} />
+          <Row label="Relationships" value={contact.relationships} />
+          <Row label="Consultants" value={contact.consultants} />
           <Row label="Platform" value={contact.platformDescription} />
+          <Row label="All Email" value={contact.allEmail} />
+          <Row label="All Phone" value={contact.allPhone} />
+          <Row label="Company Street" value={contact.companyStreet} />
+          <Row label="Company City" value={contact.companyCity} />
+          <Row label="Assigned To" value={contact.assignedTo} />
           <Row label="Background" value={contact.backgroundInfo} />
           <Row label="Notes" value={contact.notes} />
         </div>
@@ -893,13 +1043,12 @@ function ContactDetailModal({ contact, onClose, onEdit, emails, meetings }) {
 }
 
 // ─── CONTACTS TAB ─────────────────────────────────────────────────────────────
-function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
-  const [search, setSearch] = useState("");
+function ContactsTab({ contactsCol, emails, meetings, groups }) {
+  const { docs: contacts, loading: contactsLoading, totalCount, totalPages, page, nextPage, prevPage, doSearch, search } = contactsCol;
+  const [searchInput, setSearchInput] = useState("");
   const [filter, setFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
   const [importGroupFilter, setImportGroupFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("name");
-  const [sortDir, setSortDir] = useState("asc");
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
@@ -907,29 +1056,21 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
   const blank = { name: "", firstName: "", middleName: "", lastName: "", suffix: "", company: "", email: "", phone: "", jobTitle: "", metroArea: "", primaryStreet1: "", primaryStreet2: "", primaryCity: "", primaryState: "", primaryZip: "", primaryCountry: "", website: "", birthday: "", school: "", backgroundInfo: "", industry: "", investments: "", linkedIn: "", connectedVia: "", platformDescription: "", researchTeam: "", bd: "", status: "prospect", tags: "", notes: "" };
   const [form, setForm] = useState(blank);
 
-  // Get unique import groups for filter dropdown
-  const importGroups = [...new Set(contacts.map(c => c.importGroups).filter(Boolean))].sort();
+  function handleSearchChange(val) {
+    setSearchInput(val);
+    doSearch(val);
+  }
 
+  // Client-side filter on top of server-paginated results
   const filtered = contacts.filter(c => {
-    const q = search.toLowerCase();
-    const matchSearch = c.name?.toLowerCase().includes(q) || c.company?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q) || c.firstName?.toLowerCase().includes(q) || c.lastName?.toLowerCase().includes(q);
     const matchFilter = filter === "all" || c.status === filter;
     const matchGroup = groupFilter === "all" || (c.groups || []).includes(groupFilter);
     const matchImportGroup = importGroupFilter === "all" || c.importGroups === importGroupFilter;
-    return matchSearch && matchFilter && matchGroup && matchImportGroup;
-  }).sort((a, b) => {
-    let aVal = "", bVal = "";
-    if (sortBy === "name") { aVal = a.lastName || a.name || ""; bVal = b.lastName || b.name || ""; }
-    else if (sortBy === "company") { aVal = a.company || ""; bVal = b.company || ""; }
-    else if (sortBy === "status") { aVal = a.status || ""; bVal = b.status || ""; }
-    else if (sortBy === "health") { aVal = calcHealthScore(a, emails, meetings).score; bVal = calcHealthScore(b, emails, meetings).score; return sortDir === "asc" ? aVal - bVal : bVal - aVal; }
-    return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    return matchFilter && matchGroup && matchImportGroup;
   });
 
-  function toggleSort(field) {
-    if (sortBy === field) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortBy(field); setSortDir("asc"); }
-  }
+  // Import groups from current page only
+  const importGroups = [...new Set(contacts.map(c => c.importGroups).filter(Boolean))].sort();
 
   function openNew() { setForm(blank); setEditing(null); setShowModal(true); }
   function openEdit(c) { setForm({ ...c, tags: (c.tags || []).join(", ") }); setEditing(c); setShowModal(true); }
@@ -949,7 +1090,7 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
   return (
     <div>
       <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search contacts…" style={{ flex: 1, minWidth: 180, background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#e0e0ff", fontSize: 14, fontFamily: "inherit", outline: "none" }} />
+        <input value={searchInput} onChange={e => handleSearchChange(e.target.value)} placeholder="Search contacts…" style={{ flex: 1, minWidth: 180, background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#e0e0ff", fontSize: 14, fontFamily: "inherit", outline: "none" }} />
         <select value={filter} onChange={e => setFilter(e.target.value)} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#e0e0ff", fontSize: 14, fontFamily: "inherit", outline: "none" }}>
           {["all","prospect","active","customer","inactive"].map(s => <option key={s} value={s}>{s === "all" ? "All Statuses" : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
         </select>
@@ -980,20 +1121,21 @@ function ContactsTab({ contacts, emails, meetings, groups, contactsCol }) {
         }}>🗑 Delete All ({contacts.length})</Btn>}
         <div style={{ fontSize: 11, color: "#555", alignSelf: "center" }}>Double-click a contact to open</div>
       </div>
-      {/* Sort + filter bar */}
+      {/* Page info + filter bar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "#555" }}>{filtered.length} contacts · Sort:</span>
-        {[["name","Name"],["company","Company"],["status","Status"],["health","Health"]].map(([field, label]) => (
-          <button key={field} onClick={() => toggleSort(field)} style={{ padding: "4px 12px", borderRadius: 20, border: `1px solid ${sortBy === field ? "#6366f1" : "#2a2a3a"}`, background: sortBy === field ? "#6366f120" : "transparent", color: sortBy === field ? "#6366f1" : "#666", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-            {label} {sortBy === field ? (sortDir === "asc" ? "↑" : "↓") : ""}
-          </button>
-        ))}
+        <span style={{ fontSize: 12, color: "#555" }}>
+          {search ? `${filtered.length} results` : `${totalCount.toLocaleString()} total · page ${page + 1} of ${totalPages || 1}`}
+        </span>
         {importGroups.length > 0 && (
           <select value={importGroupFilter} onChange={e => setImportGroupFilter(e.target.value)} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "4px 10px", color: "#e0e0ff", fontSize: 12, fontFamily: "inherit", outline: "none" }}>
             <option value="all">All Import Groups</option>
             {importGroups.map(g => <option key={g} value={g}>{g}</option>)}
           </select>
         )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button onClick={prevPage} disabled={page === 0} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: page === 0 ? "#333" : "#9999cc", cursor: page === 0 ? "not-allowed" : "pointer", fontSize: 12 }}>← Prev</button>
+          <button onClick={() => { const last = contacts[contacts.length - 1]; if (last) nextPage(last); }} disabled={page >= totalPages - 1 || contacts.length < 50} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: (page >= totalPages - 1 || contacts.length < 50) ? "#333" : "#9999cc", cursor: (page >= totalPages - 1 || contacts.length < 50) ? "not-allowed" : "pointer", fontSize: 12 }}>Next →</button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gap: 10 }}>
@@ -1764,7 +1906,7 @@ function OutreachTab({ contacts }) {
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function CRM() {
   const [tab, setTab] = useState("Dashboard");
-  const contactsCol = useCollection("contacts");
+  const contactsCol = usePaginatedContacts();
   const emailsCol = useCollection("emails");
   const meetingsCol = useCollection("meetings");
   const groupsCol = useCollection("groups");
@@ -1774,7 +1916,7 @@ export default function CRM() {
   const { syncing, lastSync, connectGmail, syncAll } = useGmailSync(contactsCol.docs, emailsCol, gmailAccountsCol.docs);
   const { calConnected, syncing: calSyncing, connectCalendar, syncCalendar } = useGoogleCalendar(contactsCol.docs, meetingsCol);
 
-  const loading = contactsCol.loading || emailsCol.loading || meetingsCol.loading || groupsCol.loading;
+  const loading = emailsCol.loading || meetingsCol.loading || groupsCol.loading;
 
   return (
     <>
@@ -1815,10 +1957,10 @@ export default function CRM() {
 
           <div style={{ animation: "fadeIn 0.2s ease" }} key={tab}>
             {loading ? <Spinner /> : <>
-              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} emailsCol={emailsCol} />}
-              {tab === "Contacts" && <ContactsTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} contactsCol={contactsCol} />}
-              {tab === "Companies" && <CompaniesTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} />}
-              {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} />}
+              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} emailsCol={emailsCol} totalContacts={contactsCol.totalCount} />}
+              {tab === "Contacts" && <ContactsTab contactsCol={contactsCol} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} />}
+              {tab === "Companies" && <CompaniesTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} totalCount={contactsCol.totalCount} />}
+              {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} totalContacts={contactsCol.totalCount} />}
               {tab === "Emails" && <EmailsTab emails={emailsCol.docs} contacts={contactsCol.docs} emailsCol={emailsCol} gmailAccounts={gmailAccountsCol.docs} gmailAccountsCol={gmailAccountsCol} syncing={syncing} lastSync={lastSync} connectGmail={connectGmail} syncAll={syncAll} />}
               {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={contactsCol.docs} meetingsCol={meetingsCol} calConnected={calConnected} calSyncing={calSyncing} connectCalendar={connectCalendar} syncCalendar={syncCalendar} />}
               {tab === "Pipeline" && <PipelineTab contacts={contactsCol.docs} pipelinesCol={pipelinesCol} />}
