@@ -61,7 +61,7 @@ function usePaginatedContacts() {
   const [loading, setLoading] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
-  const [cursors, setCursors] = useState([null]); // cursor stack per page
+  const [lastDocs, setLastDocs] = useState({}); // cache of last doc per page
   const [search, setSearchState] = useState("");
   const searchTimeout = useRef(null);
 
@@ -72,39 +72,49 @@ function usePaginatedContacts() {
     }).catch(() => {});
   }, []);
 
-  // Load page
+  // Load page whenever page or search changes
   useEffect(() => {
     setLoading(true);
     let q;
     if (search) {
-      // For search: load more docs and filter client-side
-      q = query(collection(db, "contacts"), orderBy("name"), limit(500));
+      q = query(collection(db, "contacts"), limit(300));
+    } else if (page > 0 && lastDocs[page - 1]) {
+      q = query(collection(db, "contacts"), orderBy("name"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
+    } else if (page === 0) {
+      q = query(collection(db, "contacts"), orderBy("name"), limit(PAGE_SIZE));
     } else {
-      const cursor = cursors[page];
-      q = cursor
-        ? query(collection(db, "contacts"), orderBy("name"), startAfter(cursor), limit(PAGE_SIZE))
-        : query(collection(db, "contacts"), orderBy("name"), limit(PAGE_SIZE));
+      setLoading(false);
+      return;
     }
+
     getDocs(q).then(snap => {
       let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // Save the last doc of this page for next page cursor
+      if (!search && snap.docs.length > 0) {
+        setLastDocs(prev => ({ ...prev, [page]: snap.docs[snap.docs.length - 1] }));
+      }
+
       if (search) {
-        const q2 = search.toLowerCase();
+        const sq = search.toLowerCase();
         results = results.filter(c =>
-          c.name?.toLowerCase().includes(q2) ||
-          c.firstName?.toLowerCase().includes(q2) ||
-          c.lastName?.toLowerCase().includes(q2) ||
-          c.company?.toLowerCase().includes(q2) ||
-          c.email?.toLowerCase().includes(q2)
+          c.name?.toLowerCase().includes(sq) ||
+          c.firstName?.toLowerCase().includes(sq) ||
+          c.lastName?.toLowerCase().includes(sq) ||
+          c.company?.toLowerCase().includes(sq) ||
+          c.email?.toLowerCase().includes(sq)
         );
       }
       setDocs(results);
       setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [page, cursors, search]);
+    }).catch(err => {
+      console.error("Firestore error:", err);
+      setLoading(false);
+    });
+  }, [page, search]);
 
-  function nextPage(lastDoc) {
-    setCursors(c => { const n = [...c]; n[page + 1] = lastDoc; return n; });
-    setPage(p => p + 1);
+  function nextPage() {
+    if (lastDocs[page]) setPage(p => p + 1);
   }
   function prevPage() { setPage(p => Math.max(0, p - 1)); }
 
@@ -113,17 +123,16 @@ function usePaginatedContacts() {
     searchTimeout.current = setTimeout(() => {
       setSearchState(val);
       setPage(0);
-      setCursors([null]);
-    }, 300);
+    }, 400);
   }
 
-  async function add(data) { 
+  async function add(data) {
     const ref = await addDoc(collection(db, "contacts"), data);
     setTotalCount(c => c + 1);
     return ref;
   }
   async function update(id, data) { await updateDoc(doc(db, "contacts", id), data); }
-  async function remove(id) { 
+  async function remove(id) {
     await deleteDoc(doc(db, "contacts", id));
     setTotalCount(c => c - 1);
     setDocs(d => d.filter(x => x.id !== id));
@@ -1134,7 +1143,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button onClick={prevPage} disabled={page === 0} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: page === 0 ? "#333" : "#9999cc", cursor: page === 0 ? "not-allowed" : "pointer", fontSize: 12 }}>← Prev</button>
-          <button onClick={() => { const last = contacts[contacts.length - 1]; if (last) nextPage(last); }} disabled={page >= totalPages - 1 || contacts.length < 50} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: (page >= totalPages - 1 || contacts.length < 50) ? "#333" : "#9999cc", cursor: (page >= totalPages - 1 || contacts.length < 50) ? "not-allowed" : "pointer", fontSize: 12 }}>Next →</button>
+          <button onClick={nextPage} disabled={page >= totalPages - 1 || contacts.length < PAGE_SIZE} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: (page >= totalPages - 1 || contacts.length < PAGE_SIZE) ? "#333" : "#9999cc", cursor: (page >= totalPages - 1 || contacts.length < PAGE_SIZE) ? "not-allowed" : "pointer", fontSize: 12 }}>Next →</button>
         </div>
       </div>
 
