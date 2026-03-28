@@ -79,21 +79,15 @@ function usePaginatedContacts() {
     if (search) {
       q = query(collection(db, "contacts"), limit(300));
     } else if (page > 0 && lastDocs[page - 1]) {
-      q = query(collection(db, "contacts"), orderBy("lastName"), orderBy("firstName"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), orderBy("name"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
     } else if (page === 0) {
-      q = query(collection(db, "contacts"), orderBy("lastName"), orderBy("firstName"), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), orderBy("name"), limit(PAGE_SIZE));
     } else {
       setLoading(false);
       return;
     }
 
-    getDocs(q).catch(() => {
-      // Fallback to name sort if composite index not ready yet
-      const fallback = page > 0 && lastDocs[page - 1]
-        ? query(collection(db, "contacts"), orderBy("name"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE))
-        : query(collection(db, "contacts"), orderBy("name"), limit(PAGE_SIZE));
-      return getDocs(fallback);
-    }).then(snap => {
+    getDocs(q).then(snap => {
       let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
       // Save the last doc of this page for next page cursor
