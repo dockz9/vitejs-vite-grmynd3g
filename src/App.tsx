@@ -1076,6 +1076,9 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
 
   // Client-side filter on top of server-paginated results
   const filtered = contacts.filter(c => {
+    // Hide company-only entries (no personal name) from contacts page
+    const hasPersonalName = c.firstName || c.lastName || (c.name && c.name !== c.company);
+    if (!hasPersonalName) return false;
     const matchFilter = filter === "all" || c.status === filter;
     const matchGroup = groupFilter === "all" || (c.groups || []).includes(groupFilter);
     const matchImportGroup = importGroupFilter === "all" || c.importGroups === importGroupFilter;
@@ -1531,12 +1534,17 @@ function CompaniesTab({ contacts, emails, meetings }) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
+  const [showDetail, setShowDetail] = useState(null);
 
+  // Group ALL contacts by company (including company-only entries)
   const companies = Object.values(
-    contacts.filter(c => c.company).reduce((acc, c) => {
+    contacts.filter(c => c.company && c.company.trim()).reduce((acc, c) => {
       const key = c.company.trim();
-      if (!acc[key]) acc[key] = { name: key, contacts: [] };
-      acc[key].contacts.push(c);
+      if (!acc[key]) acc[key] = { name: key, contacts: [], companyOnly: null };
+      // If this contact has no personal name, treat as company-only record
+      const hasPersonalName = c.firstName || c.lastName || (c.name && c.name !== c.company);
+      if (!hasPersonalName) acc[key].companyOnly = c;
+      else acc[key].contacts.push(c);
       return acc;
     }, {})
   ).filter(co => co.name.toLowerCase().includes(search.toLowerCase()))
@@ -1553,16 +1561,23 @@ function CompaniesTab({ contacts, emails, meetings }) {
         </div>
         <div style={{ fontSize: 12, color: "#555", marginBottom: 12 }}>{companies.length} companies</div>
         <div style={{ display: "grid", gap: 8 }}>
-          {companies.map(co => (
-            <div key={co.name} onClick={() => setSelected(selected === co.name ? null : co.name)}
-              style={{ background: "#0d0d14", border: `1px solid ${selected === co.name ? "#6366f1" : "#1e1e2e"}`, borderRadius: 10, padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, transition: "all 0.15s" }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: "#6366f120", border: "1px solid #6366f130", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#6366f1", flexShrink: 0 }}>{co.name[0]}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13, fontFamily: "'Syne', sans-serif" }}>{co.name}</div>
-                <div style={{ fontSize: 11, color: "#666" }}>{co.contacts.length} contact{co.contacts.length !== 1 ? "s" : ""}</div>
+          {companies.map(co => {
+            const totalPeople = co.contacts.length;
+            const isSelected = selected === co.name;
+            return (
+              <div key={co.name} onClick={() => setSelected(isSelected ? null : co.name)}
+                style={{ background: "#0d0d14", border: `1px solid ${isSelected ? "#6366f1" : "#1e1e2e"}`, borderRadius: 10, padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, transition: "all 0.15s" }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: "#6366f120", border: "1px solid #6366f130", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#6366f1", flexShrink: 0 }}>{co.name[0]}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13, fontFamily: "'Syne', sans-serif" }}>{co.name}</div>
+                  <div style={{ fontSize: 11, color: "#666" }}>
+                    {totalPeople > 0 ? `${totalPeople} contact${totalPeople !== 1 ? "s" : ""}` : "Company only"}
+                  </div>
+                </div>
+                {co.companyOnly && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: "#6366f110", color: "#6366f1", border: "1px solid #6366f130" }}>profile</span>}
               </div>
-            </div>
-          ))}
+            );
+          })}
           {companies.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No companies found.</div>}
         </div>
       </div>
@@ -1573,33 +1588,55 @@ function CompaniesTab({ contacts, emails, meetings }) {
             <div style={{ width: 44, height: 44, borderRadius: 10, background: "#6366f120", border: "1px solid #6366f130", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 700, color: "#6366f1" }}>{selectedCompany.name[0]}</div>
             <div>
               <div style={{ fontWeight: 800, color: "#f0f0ff", fontSize: 18, fontFamily: "'Syne', sans-serif" }}>{selectedCompany.name}</div>
-              <div style={{ fontSize: 12, color: "#666" }}>{selectedCompany.contacts.length} employees in CRM</div>
+              <div style={{ fontSize: 12, color: "#666" }}>{selectedCompany.contacts.length} people in CRM</div>
             </div>
           </div>
-          <div style={{ display: "grid", gap: 10 }}>
-            {selectedCompany.contacts.sort((a,b) => (a.lastName||a.name||"").localeCompare(b.lastName||b.name||"")).map(c => {
-              const cEmails = emails.filter(e => e.contactId === c.id).length;
-              const cMeetings = meetings.filter(m => m.contactId === c.id).length;
-              const health = calcHealthScore(c, emails, meetings);
-              return (
-                <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 10, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-                  <Avatar name={c.name || "?"} size={36} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                      <span style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13 }}>{c.lastName ? `${c.lastName}, ${c.firstName||""}` : c.name}</span>
-                      <StatusBadge status={c.status} />
+
+          {/* Company profile info if exists */}
+          {selectedCompany.companyOnly && (
+            <div style={{ background: "#0d0d14", border: "1px solid #6366f130", borderRadius: 10, padding: "14px 18px", marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Company Profile</div>
+              <div style={{ display: "grid", gap: 6 }}>
+                {selectedCompany.companyOnly.jobTitle && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#666" }}>Type: </span>{selectedCompany.companyOnly.jobTitle}</div>}
+                {selectedCompany.companyOnly.industry && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#666" }}>Industry: </span>{selectedCompany.companyOnly.industry}</div>}
+                {selectedCompany.companyOnly.phone && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#666" }}>Phone: </span>{selectedCompany.companyOnly.phone}</div>}
+                {selectedCompany.companyOnly.email && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#666" }}>Email: </span>{selectedCompany.companyOnly.email}</div>}
+                {selectedCompany.companyOnly.website && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#666" }}>Website: </span>{selectedCompany.companyOnly.website}</div>}
+                {selectedCompany.companyOnly.primaryCity && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#666" }}>Location: </span>{[selectedCompany.companyOnly.primaryCity, selectedCompany.companyOnly.primaryState, selectedCompany.companyOnly.primaryCountry].filter(Boolean).join(", ")}</div>}
+                {selectedCompany.companyOnly.notes && <div style={{ fontSize: 13, color: "#888", fontStyle: "italic", marginTop: 4 }}>{selectedCompany.companyOnly.notes}</div>}
+              </div>
+            </div>
+          )}
+
+          {/* People at this company */}
+          {selectedCompany.contacts.length > 0 ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              {selectedCompany.contacts.sort((a,b) => (a.lastName||a.name||"").localeCompare(b.lastName||b.name||"")).map(c => {
+                const cEmails = emails.filter(e => e.contactId === c.id).length;
+                const cMeetings = meetings.filter(m => m.contactId === c.id).length;
+                const health = calcHealthScore(c, emails, meetings);
+                return (
+                  <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 10, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <Avatar name={c.name || "?"} size={36} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                        <span style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13 }}>{c.lastName ? `${c.lastName}, ${c.firstName||""}` : c.name}</span>
+                        <StatusBadge status={c.status} />
+                      </div>
+                      <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>{c.jobTitle}{c.jobTitle && c.email ? " · " : ""}{c.email}</div>
+                      <HealthBar score={health.score} color={health.color} label={health.label} size="sm" />
                     </div>
-                    <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>{c.jobTitle}{c.jobTitle && c.email ? " · " : ""}{c.email}</div>
-                    <HealthBar score={health.score} color={health.color} label={health.label} size="sm" />
+                    <div style={{ display: "flex", gap: 12, color: "#666", fontSize: 11, textAlign: "center" }}>
+                      <div><div style={{ fontSize: 14, fontWeight: 700, color: "#9999cc" }}>{cEmails}</div>emails</div>
+                      <div><div style={{ fontSize: 14, fontWeight: 700, color: "#9999cc" }}>{cMeetings}</div>mtgs</div>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 12, color: "#666", fontSize: 11, textAlign: "center" }}>
-                    <div><div style={{ fontSize: 14, fontWeight: 700, color: "#9999cc" }}>{cEmails}</div>emails</div>
-                    <div><div style={{ fontSize: 14, fontWeight: 700, color: "#9999cc" }}>{cMeetings}</div>mtgs</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No individual contacts at this company yet.</div>
+          )}
         </div>
       )}
     </div>
