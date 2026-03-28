@@ -77,20 +77,17 @@ function usePaginatedContacts() {
     setLoading(true);
     let q;
     if (search) {
-      q = query(collection(db, "contacts"), limit(300));
+      q = query(collection(db, "contacts"), limit(500));
     } else if (page > 0 && lastDocs[page - 1]) {
-      q = query(collection(db, "contacts"), orderBy("name"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
-    } else if (page === 0) {
-      q = query(collection(db, "contacts"), orderBy("name"), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
     } else {
-      setLoading(false);
-      return;
+      q = query(collection(db, "contacts"), limit(PAGE_SIZE));
     }
 
     getDocs(q).then(snap => {
       let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      
-      // Save the last doc of this page for next page cursor
+
+      // Save last doc for next page cursor
       if (!search && snap.docs.length > 0) {
         setLastDocs(prev => ({ ...prev, [page]: snap.docs[snap.docs.length - 1] }));
       }
@@ -105,6 +102,17 @@ function usePaginatedContacts() {
           c.email?.toLowerCase().includes(sq)
         );
       }
+
+      // Sort client-side by lastName then firstName
+      results.sort((a, b) => {
+        const aLast = (a.lastName || a.name || "").toLowerCase();
+        const bLast = (b.lastName || b.name || "").toLowerCase();
+        if (aLast !== bLast) return aLast.localeCompare(bLast);
+        const aFirst = (a.firstName || "").toLowerCase();
+        const bFirst = (b.firstName || "").toLowerCase();
+        return aFirst.localeCompare(bFirst);
+      });
+
       setDocs(results);
       setLoading(false);
     }).catch(err => {
@@ -1074,8 +1082,14 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
     doSearch(val);
   }
 
+  // Build display name from parts if name field is empty
+  const contactsWithNames = contacts.map(c => ({
+    ...c,
+    name: c.name || [c.firstName, c.middleName, c.lastName, c.suffix].filter(Boolean).join(" ") || c.company || "Unknown"
+  }));
+
   // Client-side filter on top of server-paginated results
-  const filtered = contacts.filter(c => {
+  const filtered = contactsWithNames.filter(c => {
     // Hide company-only entries (no personal name) from contacts page
     const hasPersonalName = c.firstName || c.lastName || (c.name && c.name !== c.company);
     if (!hasPersonalName) return false;
@@ -1160,7 +1174,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
               <Avatar name={c.name || "?"} size={40} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{c.lastName ? `${c.lastName}, ${c.firstName || ""}${c.middleName ? " " + c.middleName : ""}` : c.name}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{c.lastName ? `${c.lastName}, ${c.firstName || ""}${c.middleName ? " " + c.middleName : ""}` : c.name || c.company}</span>
                   <StatusBadge status={c.status} />
                   {cGroups.map(g => <Tag key={g.id} color={g.color || "#6366f1"}>{g.name}</Tag>)}
                   {c.importGroups && <Tag color="#8b5cf6">{c.importGroups}</Tag>}
