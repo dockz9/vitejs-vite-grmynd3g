@@ -79,9 +79,9 @@ function usePaginatedContacts() {
     if (search) {
       q = query(collection(db, "contacts"), limit(300));
     } else if (page > 0 && lastDocs[page - 1]) {
-      q = query(collection(db, "contacts"), orderBy("name"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), orderBy("lastName"), orderBy("firstName"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
     } else if (page === 0) {
-      q = query(collection(db, "contacts"), orderBy("name"), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), orderBy("lastName"), orderBy("firstName"), limit(PAGE_SIZE));
     } else {
       setLoading(false);
       return;
@@ -910,6 +910,7 @@ function CSVImportModal({ onClose, contactsCol }) {
     }
     setImporting(false);
     setDone(true);
+    if (fileRef.current) fileRef.current.value = "";
   }
 
   return (
@@ -917,7 +918,7 @@ function CSVImportModal({ onClose, contactsCol }) {
       {!preview ? (
         <div>
           <p style={{ color: "#888", fontSize: 13, marginBottom: 20, lineHeight: 1.6 }}>Export contacts from HubSpot, Salesforce, Excel, or Google Contacts as CSV, then upload here.</p>
-          <div style={{ border: "2px dashed #2a2a3a", borderRadius: 12, padding: "40px", textAlign: "center", cursor: "pointer" }} onClick={() => fileRef.current.click()}>
+          <div style={{ border: "2px dashed #2a2a3a", borderRadius: 12, padding: "40px", textAlign: "center", cursor: "pointer" }} onClick={() => { if (fileRef.current) { fileRef.current.value = ""; fileRef.current.click(); } }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>📁</div>
             <div style={{ color: "#888", fontSize: 13 }}>Click to upload CSV file</div>
             <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleFile} />
@@ -928,7 +929,10 @@ function CSVImportModal({ onClose, contactsCol }) {
           <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#f0f0ff", marginBottom: 8 }}>Import Complete!</div>
           <div style={{ color: "#888", fontSize: 13, marginBottom: 24 }}>{preview.allRows.length} contacts imported.</div>
-          <Btn onClick={onClose}>Close</Btn>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            <Btn variant="ghost" onClick={() => { setDone(false); setPreview(null); setMapping({}); if (fileRef.current) fileRef.current.value = ""; }}>Import Another File</Btn>
+            <Btn onClick={onClose}>Done</Btn>
+          </div>
         </div>
       ) : (
         <div>
@@ -1120,14 +1124,6 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
             }
           }}>↩ Undo Last Import</Btn>
         )}
-        {contacts.length > 0 && <Btn variant="danger" onClick={async () => {
-          if (!window.confirm(`Delete ALL ${contacts.length} contacts? This cannot be undone.`)) return;
-          const BATCH = 50;
-          for (let i = 0; i < contacts.length; i += BATCH) {
-            await Promise.all(contacts.slice(i, i + BATCH).map(c => contactsCol.remove(c.id)));
-            await new Promise(r => setTimeout(r, 200));
-          }
-        }}>🗑 Delete All ({contacts.length})</Btn>}
         <div style={{ fontSize: 11, color: "#555", alignSelf: "center" }}>Double-click a contact to open</div>
       </div>
       {/* Page info + filter bar */}
