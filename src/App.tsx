@@ -151,6 +151,50 @@ function usePaginatedContacts() {
   return { docs, loading, totalCount, totalPages, page, nextPage, prevPage, add, update, remove, doSearch, search };
 }
 
+// Hook to load all companies from contacts efficiently
+function useCompanies() {
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadAllCompanies() {
+      setLoading(true);
+      const companyMap = {};
+      let lastDoc = null;
+      const BATCH = 500;
+
+      while (true) {
+        const q = lastDoc
+          ? query(collection(db, "contacts"), startAfter(lastDoc), limit(BATCH))
+          : query(collection(db, "contacts"), limit(BATCH));
+        const snap = await getDocs(q);
+        if (snap.empty) break;
+
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const co = data.company?.trim();
+          if (!co) return;
+          if (!companyMap[co]) companyMap[co] = { name: co, contacts: [], companyOnly: null };
+          const hasPersonalName = data.firstName || data.lastName || (data.name && data.name !== co);
+          if (!hasPersonalName) companyMap[co].companyOnly = { id: d.id, ...data };
+          else companyMap[co].contacts.push({ id: d.id, ...data });
+        });
+
+        lastDoc = snap.docs[snap.docs.length - 1];
+        if (snap.docs.length < BATCH) break;
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      setCompanies(Object.values(companyMap).sort((a, b) => a.name.localeCompare(b.name)));
+      setLoading(false);
+    }
+
+    loadAllCompanies();
+  }, []);
+
+  return { companies, loading };
+}
+
 // ─── RELATIONSHIP HEALTH SCORE ────────────────────────────────────────────────
 function calcHealthScore(contact, emails, meetings) {
   const now = Date.now();
@@ -1410,7 +1454,16 @@ function EmailsTab({ emails, contacts, emailsCol, gmailAccounts, gmailAccountsCo
   function openNew() { setForm({ contactId: contacts[0]?.id || "", subject: "", body: "", direction: "sent" }); setShowModal(true); }
   async function save() { await emailsCol.add({ ...form, date: new Date().toISOString().slice(0, 10) }); setShowModal(false); }
 
-  const sorted = [...emails].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const sorted = [...emails].sort((a, b) => {
+    const aContact = contacts.find(c => c.id === a.contactId);
+    const bContact = contacts.find(c => c.id === b.contactId);
+    const aName = (aContact?.lastName || aContact?.name || "").toLowerCase();
+    const bName = (bContact?.lastName || bContact?.name || "").toLowerCase();
+    if (aName !== bName) return aName.localeCompare(bName);
+    const aFirst = (aContact?.firstName || "").toLowerCase();
+    const bFirst = (bContact?.firstName || "").toLowerCase();
+    return aFirst.localeCompare(bFirst);
+  });
 
   return (
     <div>
@@ -1544,27 +1597,19 @@ function MeetingsTab({ meetings, contacts, meetingsCol, calConnected, calSyncing
 }
 
 // ─── COMPANIES TAB ───────────────────────────────────────────────────────────
-function CompaniesTab({ contacts, emails, meetings }) {
+function CompaniesTab({ emails, meetings }) {
+  const { companies: allCompanies, loading: companiesLoading } = useCompanies();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
-  const [showDetail, setShowDetail] = useState(null);
 
-  // Group ALL contacts by company (including company-only entries)
-  const companies = Object.values(
-    contacts.filter(c => c.company && c.company.trim()).reduce((acc, c) => {
-      const key = c.company.trim();
-      if (!acc[key]) acc[key] = { name: key, contacts: [], companyOnly: null };
-      // If this contact has no personal name, treat as company-only record
-      const hasPersonalName = c.firstName || c.lastName || (c.name && c.name !== c.company);
-      if (!hasPersonalName) acc[key].companyOnly = c;
-      else acc[key].contacts.push(c);
-      return acc;
-    }, {})
-  ).filter(co => co.name.toLowerCase().includes(search.toLowerCase()))
-   .sort((a, b) => sortDir === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
+  const companies = allCompanies
+    .filter(co => co.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => sortDir === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
 
   const selectedCompany = companies.find(co => co.name === selected);
+
+  if (companiesLoading) return <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>⟳ Loading all companies… this may take a moment</div>;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20 }}>
@@ -2015,7 +2060,7 @@ export default function CRM() {
             {loading ? <Spinner /> : <>
               {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} emailsCol={emailsCol} totalContacts={contactsCol.totalCount} />}
               {tab === "Contacts" && <ContactsTab contactsCol={contactsCol} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} />}
-              {tab === "Companies" && <CompaniesTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} totalCount={contactsCol.totalCount} />}
+              {tab === "Companies" && <CompaniesTab emails={emailsCol.docs} meetings={meetingsCol.docs} />}
               {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} totalContacts={contactsCol.totalCount} />}
               {tab === "Emails" && <EmailsTab emails={emailsCol.docs} contacts={contactsCol.docs} emailsCol={emailsCol} gmailAccounts={gmailAccountsCol.docs} gmailAccountsCol={gmailAccountsCol} syncing={syncing} lastSync={lastSync} connectGmail={connectGmail} syncAll={syncAll} />}
               {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={contactsCol.docs} meetingsCol={meetingsCol} calConnected={calConnected} calSyncing={calSyncing} connectCalendar={connectCalendar} syncCalendar={syncCalendar} />}
