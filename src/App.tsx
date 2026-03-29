@@ -195,6 +195,48 @@ function useCompanies() {
   return { companies, loading };
 }
 
+// Hook to load all imported groups from all contacts
+function useImportedGroups() {
+  const [groupMap, setGroupMap] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadAllGroups() {
+      setLoading(true);
+      const map = {};
+      let lastDoc = null;
+      const BATCH = 500;
+
+      while (true) {
+        const q = lastDoc
+          ? query(collection(db, "contacts"), startAfter(lastDoc), limit(BATCH))
+          : query(collection(db, "contacts"), limit(BATCH));
+        const snap = await getDocs(q);
+        if (snap.empty) break;
+
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const g = data.importGroups?.trim();
+          if (!g) return;
+          if (!map[g]) map[g] = [];
+          map[g].push({ id: d.id, ...data });
+        });
+
+        lastDoc = snap.docs[snap.docs.length - 1];
+        if (snap.docs.length < BATCH) break;
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      setGroupMap(map);
+      setLoading(false);
+    }
+
+    loadAllGroups();
+  }, []);
+
+  return { groupMap, loading };
+}
+
 // ─── RELATIONSHIP HEALTH SCORE ────────────────────────────────────────────────
 function calcHealthScore(contact, emails, meetings) {
   const now = Date.now();
@@ -1328,7 +1370,7 @@ function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
   const selectedContacts = selected
     ? selectedType === "manual"
       ? contacts.filter(c => (c.groups || []).includes(selected))
-      : contacts.filter(c => c.importGroups === selected)
+      : (groupMap[selected] || [])
     : [];
 
   const selectedName = selected
@@ -1339,6 +1381,8 @@ function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
 
   const filteredManual = groups.filter(g => g.name.toLowerCase().includes(search.toLowerCase()));
   const filteredImported = importedGroups.filter(g => g.toLowerCase().includes(search.toLowerCase()));
+
+  if (groupsLoading) return <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>⟳ Loading all groups… this may take a moment</div>;
 
   function selectGroup(id, type) {
     if (selected === id && selectedType === type) { setSelected(null); setSelectedType(null); }
@@ -2061,7 +2105,7 @@ export default function CRM() {
               {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} emailsCol={emailsCol} totalContacts={contactsCol.totalCount} />}
               {tab === "Contacts" && <ContactsTab contactsCol={contactsCol} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} />}
               {tab === "Companies" && <CompaniesTab emails={emailsCol.docs} meetings={meetingsCol.docs} />}
-              {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} totalContacts={contactsCol.totalCount} />}
+              {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} />}
               {tab === "Emails" && <EmailsTab emails={emailsCol.docs} contacts={contactsCol.docs} emailsCol={emailsCol} gmailAccounts={gmailAccountsCol.docs} gmailAccountsCol={gmailAccountsCol} syncing={syncing} lastSync={lastSync} connectGmail={connectGmail} syncAll={syncAll} />}
               {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={contactsCol.docs} meetingsCol={meetingsCol} calConnected={calConnected} calSyncing={calSyncing} connectCalendar={connectCalendar} syncCalendar={syncCalendar} />}
               {tab === "Pipeline" && <PipelineTab contacts={contactsCol.docs} pipelinesCol={pipelinesCol} />}
