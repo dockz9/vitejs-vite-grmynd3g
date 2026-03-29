@@ -31,7 +31,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-const TABS = ["Dashboard", "Contacts", "Companies", "Groups", "Emails", "Meetings", "Pipeline", "Pitchdecks", "News", "Outreach"];
+const TABS = ["Dashboard", "Contacts", "Companies", "Groups", "Emails", "Meetings", "Tasks", "Pipeline", "Pitchdecks", "News", "Outreach"];
 const STATUS_COLORS = {
   prospect: "#f59e0b", active: "#10b981", inactive: "#6b7280", customer: "#3b82f6",
 };
@@ -710,6 +710,35 @@ function DashboardTab({ contacts, emails, meetings, emailsCol }) {
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff" }}>{m.title}</div>
                     <div style={{ fontSize: 11, color: "#666" }}>{contact?.name} · {m.date} · {m.time}</div>
                   </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Pending tasks */}
+      {tasks && tasks.filter(t => t.status === "pending").length > 0 && (
+        <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
+          <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", marginBottom: 14, fontSize: 14 }}>
+            ✓ Pending Tasks ({tasks.filter(t => t.status === "pending").length})
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {tasks.filter(t => t.status === "pending").sort((a, b) => {
+              const order = { high: 0, medium: 1, low: 2 };
+              return (order[a.priority] || 1) - (order[b.priority] || 1);
+            }).slice(0, 5).map(t => {
+              const contact = contacts.find(c => c.id === t.contactId);
+              const isOverdue = t.dueDate && new Date(t.dueDate) < new Date();
+              const PRIORITY_COLORS = { high: "#ef4444", medium: "#f59e0b", low: "#10b981" };
+              return (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "#080810", borderRadius: 8, border: `1px solid ${isOverdue ? "#ef444430" : "#1a1a2a"}` }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: PRIORITY_COLORS[t.priority] || "#6366f1", flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff" }}>{t.title}</div>
+                    {contact && <div style={{ fontSize: 11, color: "#666" }}>{contact.lastName ? `${contact.lastName}, ${contact.firstName || ""}` : contact.name}</div>}
+                  </div>
+                  {t.dueDate && <div style={{ fontSize: 11, color: isOverdue ? "#ef4444" : "#555" }}>{t.dueDate}</div>}
                 </div>
               );
             })}
@@ -1498,16 +1527,7 @@ function EmailsTab({ emails, contacts, emailsCol, gmailAccounts, gmailAccountsCo
   function openNew() { setForm({ contactId: contacts[0]?.id || "", subject: "", body: "", direction: "sent" }); setShowModal(true); }
   async function save() { await emailsCol.add({ ...form, date: new Date().toISOString().slice(0, 10) }); setShowModal(false); }
 
-  const sorted = [...emails].sort((a, b) => {
-    const aContact = contacts.find(c => c.id === a.contactId);
-    const bContact = contacts.find(c => c.id === b.contactId);
-    const aName = (aContact?.lastName || aContact?.name || "").toLowerCase();
-    const bName = (bContact?.lastName || bContact?.name || "").toLowerCase();
-    if (aName !== bName) return aName.localeCompare(bName);
-    const aFirst = (aContact?.firstName || "").toLowerCase();
-    const bFirst = (bContact?.firstName || "").toLowerCase();
-    return aFirst.localeCompare(bFirst);
-  });
+  const sorted = [...emails].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   return (
     <div>
@@ -1741,6 +1761,117 @@ function CompaniesTab({ emails, meetings }) {
             <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No individual contacts at this company yet.</div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TASKS TAB ───────────────────────────────────────────────────────────────
+function TasksTab({ contacts, tasksCol }) {
+  const [showModal, setShowModal] = useState(false);
+  const [filter, setFilter] = useState("pending");
+  const [form, setForm] = useState({ contactId: "", title: "", notes: "", dueDate: "", priority: "medium" });
+
+  const PRIORITY_COLORS = { high: "#ef4444", medium: "#f59e0b", low: "#10b981" };
+
+  function openNew() {
+    setForm({ contactId: contacts[0]?.id || "", title: "", notes: "", dueDate: "", priority: "medium" });
+    setShowModal(true);
+  }
+
+  async function save() {
+    await tasksCol.add({ ...form, status: "pending", createdAt: new Date().toISOString() });
+    setShowModal(false);
+  }
+
+  async function complete(task) {
+    await tasksCol.update(task.id, { status: "completed", completedAt: new Date().toISOString() });
+  }
+
+  const filtered = tasksCol.docs
+    .filter(t => filter === "all" || t.status === filter)
+    .sort((a, b) => {
+      if (a.priority !== b.priority) {
+        const order = { high: 0, medium: 1, low: 2 };
+        return (order[a.priority] || 1) - (order[b.priority] || 1);
+      }
+      return (a.dueDate || "").localeCompare(b.dueDate || "");
+    });
+
+  const overdue = tasksCol.docs.filter(t => t.status === "pending" && t.dueDate && new Date(t.dueDate) < new Date());
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 4, background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 8, padding: 4 }}>
+          {[["pending","Pending"],["completed","Completed"],["all","All"]].map(([val, label]) => (
+            <button key={val} onClick={() => setFilter(val)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: filter === val ? "#6366f1" : "transparent", color: filter === val ? "#fff" : "#666", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{label}</button>
+          ))}
+        </div>
+        <Btn onClick={openNew}>+ New Task</Btn>
+      </div>
+
+      {overdue.length > 0 && (
+        <div style={{ background: "#ef444410", border: "1px solid #ef444430", borderRadius: 12, padding: "14px 20px", marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, color: "#ef4444", fontSize: 13, marginBottom: 8 }}>⚠ {overdue.length} Overdue Task{overdue.length !== 1 ? "s" : ""}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {overdue.map(t => {
+              const contact = contacts.find(c => c.id === t.contactId);
+              return (
+                <div key={t.id} style={{ background: "#080810", borderRadius: 8, padding: "6px 12px", fontSize: 12, color: "#ccc", border: "1px solid #ef444420" }}>
+                  <span style={{ color: "#ef4444", fontWeight: 700 }}>{t.dueDate}</span> · {t.title}{contact ? ` · ${contact.name}` : ""}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {filtered.map(t => {
+          const contact = contacts.find(c => c.id === t.contactId);
+          const isOverdue = t.status === "pending" && t.dueDate && new Date(t.dueDate) < new Date();
+          return (
+            <div key={t.id} style={{ background: "#0d0d14", border: `1px solid ${isOverdue ? "#ef444440" : "#1e1e2e"}`, borderRadius: 12, padding: 18, display: "flex", gap: 14, alignItems: "flex-start" }}>
+              <div style={{ marginTop: 2 }}>
+                <button onClick={() => t.status === "pending" ? complete(t) : null} style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${t.status === "completed" ? "#10b981" : PRIORITY_COLORS[t.priority] || "#6366f1"}`, background: t.status === "completed" ? "#10b981" : "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12 }}>
+                  {t.status === "completed" ? "✓" : ""}
+                </button>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 700, color: t.status === "completed" ? "#555" : "#f0f0ff", fontFamily: "'Syne', sans-serif", textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: PRIORITY_COLORS[t.priority], textTransform: "uppercase", padding: "1px 8px", borderRadius: 20, background: PRIORITY_COLORS[t.priority] + "20", border: `1px solid ${PRIORITY_COLORS[t.priority]}40` }}>{t.priority}</span>
+                  {isOverdue && <span style={{ fontSize: 10, fontWeight: 700, color: "#ef4444", padding: "1px 8px", borderRadius: 20, background: "#ef444420" }}>OVERDUE</span>}
+                </div>
+                {contact && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <Avatar name={contact.name || "?"} size={18} />
+                    <span style={{ fontSize: 12, color: "#888" }}>{contact.lastName ? `${contact.lastName}, ${contact.firstName || ""}` : contact.name} · {contact.company}</span>
+                  </div>
+                )}
+                {t.dueDate && <div style={{ fontSize: 11, color: isOverdue ? "#ef4444" : "#666" }}>Due: {t.dueDate}</div>}
+                {t.notes && <div style={{ fontSize: 12, color: "#666", fontStyle: "italic", marginTop: 4 }}>{t.notes}</div>}
+              </div>
+              <Btn size="sm" variant="danger" onClick={() => { if (window.confirm("Delete this task?")) tasksCol.remove(t.id); }}>×</Btn>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "60px 0", fontStyle: "italic" }}>No {filter} tasks.</div>}
+      </div>
+
+      {showModal && (
+        <Modal title="New Task" onClose={() => setShowModal(false)}>
+          <Field label="Task Title" value={form.title} onChange={v => setForm(f => ({ ...f, title: v }))} required />
+          <Sel label="Contact" value={form.contactId} onChange={v => setForm(f => ({ ...f, contactId: v }))} options={[{ value: "", label: "-- No contact --" }, ...contacts.map(c => ({ value: c.id, label: `${c.lastName ? c.lastName + ", " + (c.firstName || "") : c.name} — ${c.company}` }))]} />
+          <Sel label="Priority" value={form.priority} onChange={v => setForm(f => ({ ...f, priority: v }))} options={[{ value: "high", label: "High" }, { value: "medium", label: "Medium" }, { value: "low", label: "Low" }]} />
+          <Field label="Due Date" value={form.dueDate} onChange={v => setForm(f => ({ ...f, dueDate: v }))} type="date" />
+          <Field label="Notes" value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} as="textarea" />
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <Btn variant="ghost" onClick={() => setShowModal(false)}>Cancel</Btn>
+            <Btn onClick={save} disabled={!form.title}>Save Task</Btn>
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -2057,6 +2188,7 @@ export default function CRM() {
   const groupsCol = useCollection("groups");
   const gmailAccountsCol = useCollection("gmail_accounts");
   const pipelinesCol = useCollection("pipeline");
+  const tasksCol = useCollection("tasks");
 
   const { syncing, lastSync, connectGmail, syncAll } = useGmailSync(contactsCol.docs, emailsCol, gmailAccountsCol.docs);
   const { calConnected, syncing: calSyncing, connectCalendar, syncCalendar } = useGoogleCalendar(contactsCol.docs, meetingsCol);
@@ -2102,12 +2234,13 @@ export default function CRM() {
 
           <div style={{ animation: "fadeIn 0.2s ease" }} key={tab}>
             {loading ? <Spinner /> : <>
-              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} emailsCol={emailsCol} totalContacts={contactsCol.totalCount} />}
+              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} emailsCol={emailsCol} totalContacts={contactsCol.totalCount} tasks={tasksCol.docs} />}
               {tab === "Contacts" && <ContactsTab contactsCol={contactsCol} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} />}
               {tab === "Companies" && <CompaniesTab emails={emailsCol.docs} meetings={meetingsCol.docs} />}
               {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} />}
               {tab === "Emails" && <EmailsTab emails={emailsCol.docs} contacts={contactsCol.docs} emailsCol={emailsCol} gmailAccounts={gmailAccountsCol.docs} gmailAccountsCol={gmailAccountsCol} syncing={syncing} lastSync={lastSync} connectGmail={connectGmail} syncAll={syncAll} />}
               {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={contactsCol.docs} meetingsCol={meetingsCol} calConnected={calConnected} calSyncing={calSyncing} connectCalendar={connectCalendar} syncCalendar={syncCalendar} />}
+              {tab === "Tasks" && <TasksTab contacts={contactsCol.docs} tasksCol={tasksCol} />}
               {tab === "Pipeline" && <PipelineTab contacts={contactsCol.docs} pipelinesCol={pipelinesCol} />}
               {tab === "Pitchdecks" && <PitchdecksTab contacts={contactsCol.docs} />}
               {tab === "News" && <NewsTab contacts={contactsCol.docs} />}
