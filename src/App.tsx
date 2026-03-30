@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore, collection, onSnapshot,
@@ -152,89 +152,94 @@ function usePaginatedContacts() {
 }
 
 // Hook to load all companies from contacts efficiently
-function useCompanies() {
+// Single hook that loads companies AND groups in one pass
+const ContactsDataContext = React.createContext(null);
+
+function useContactsData() {
+  return React.useContext(ContactsDataContext);
+}
+
+function ContactsDataProvider({ children }) {
   const [companies, setCompanies] = useState([]);
+  const [groupMap, setGroupMap] = useState({});
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    async function loadAllCompanies() {
+    async function loadAll() {
       setLoading(true);
       const companyMap = {};
+      const grpMap = {};
       let lastDoc = null;
-      const BATCH = 500;
+      const BATCH = 1000;
+      let total = 0;
 
+      try {
+        const countSnap = await getCountFromServer(collection(db, "contacts"));
+        total = countSnap.data().count;
+      } catch(e) { total = 30000; }
+
+      let loaded = 0;
       while (true) {
-        const q = lastDoc
-          ? query(collection(db, "contacts"), startAfter(lastDoc), limit(BATCH))
-          : query(collection(db, "contacts"), limit(BATCH));
-        const snap = await getDocs(q);
-        if (snap.empty) break;
+        try {
+          const q = lastDoc
+            ? query(collection(db, "contacts"), startAfter(lastDoc), limit(BATCH))
+            : query(collection(db, "contacts"), limit(BATCH));
+          const snap = await getDocs(q);
+          if (snap.empty) break;
 
-        snap.docs.forEach(d => {
-          const data = d.data();
-          const co = data.company?.trim();
-          if (!co) return;
-          if (!companyMap[co]) companyMap[co] = { name: co, contacts: [], companyOnly: null };
-          const hasPersonalName = data.firstName || data.lastName || (data.name && data.name !== co);
-          if (!hasPersonalName) companyMap[co].companyOnly = { id: d.id, ...data };
-          else companyMap[co].contacts.push({ id: d.id, ...data });
-        });
+          snap.docs.forEach(d => {
+            const data = d.data();
+            // Companies
+            const co = data.company?.trim();
+            if (co) {
+              if (!companyMap[co]) companyMap[co] = { name: co, contacts: [], companyOnly: null };
+              const hasName = data.firstName || data.lastName || (data.name && data.name !== co);
+              if (!hasName) companyMap[co].companyOnly = { id: d.id, ...data };
+              else companyMap[co].contacts.push({ id: d.id, ...data });
+            }
+            // Groups
+            const g = data.importGroups?.trim();
+            if (g) {
+              if (!grpMap[g]) grpMap[g] = [];
+              grpMap[g].push({ id: d.id, ...data });
+            }
+          });
 
-        lastDoc = snap.docs[snap.docs.length - 1];
-        if (snap.docs.length < BATCH) break;
-        await new Promise(r => setTimeout(r, 200));
+          loaded += snap.docs.length;
+          setProgress(Math.round((loaded / total) * 100));
+          lastDoc = snap.docs[snap.docs.length - 1];
+          if (snap.docs.length < BATCH) break;
+          await new Promise(r => setTimeout(r, 50));
+        } catch(e) {
+          console.error("Load error:", e);
+          break;
+        }
       }
 
       setCompanies(Object.values(companyMap).sort((a, b) => a.name.localeCompare(b.name)));
+      setGroupMap(grpMap);
       setLoading(false);
     }
 
-    loadAllCompanies();
+    loadAll();
   }, []);
 
-  return { companies, loading };
+  return (
+    <ContactsDataContext.Provider value={{ companies, groupMap, loading, progress }}>
+      {children}
+    </ContactsDataContext.Provider>
+  );
 }
 
-// Hook to load all imported groups from all contacts
+function useCompanies() {
+  const ctx = useContactsData();
+  return { companies: ctx?.companies || [], loading: ctx?.loading ?? true };
+}
+
 function useImportedGroups() {
-  const [groupMap, setGroupMap] = useState({});
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadAllGroups() {
-      setLoading(true);
-      const map = {};
-      let lastDoc = null;
-      const BATCH = 500;
-
-      while (true) {
-        const q = lastDoc
-          ? query(collection(db, "contacts"), startAfter(lastDoc), limit(BATCH))
-          : query(collection(db, "contacts"), limit(BATCH));
-        const snap = await getDocs(q);
-        if (snap.empty) break;
-
-        snap.docs.forEach(d => {
-          const data = d.data();
-          const g = data.importGroups?.trim();
-          if (!g) return;
-          if (!map[g]) map[g] = [];
-          map[g].push({ id: d.id, ...data });
-        });
-
-        lastDoc = snap.docs[snap.docs.length - 1];
-        if (snap.docs.length < BATCH) break;
-        await new Promise(r => setTimeout(r, 200));
-      }
-
-      setGroupMap(map);
-      setLoading(false);
-    }
-
-    loadAllGroups();
-  }, []);
-
-  return { groupMap, loading };
+  const ctx = useContactsData();
+  return { groupMap: ctx?.groupMap || {}, loading: ctx?.loading ?? true };
 }
 
 // ─── RELATIONSHIP HEALTH SCORE ────────────────────────────────────────────────
@@ -1411,7 +1416,15 @@ function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
   const filteredManual = groups.filter(g => g.name.toLowerCase().includes(search.toLowerCase()));
   const filteredImported = importedGroups.filter(g => g.toLowerCase().includes(search.toLowerCase()));
 
-  if (groupsLoading) return <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>⟳ Loading all groups… this may take a moment</div>;
+  const ctx2 = useContactsData();
+  if (groupsLoading) return (
+    <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>
+      <div style={{ marginBottom: 12 }}>⟳ Loading groups… {ctx2?.progress || 0}%</div>
+      <div style={{ height: 4, background: "#1e1e2e", borderRadius: 10, width: 200, margin: "0 auto", overflow: "hidden" }}>
+        <div style={{ width: `${ctx2?.progress || 0}%`, height: "100%", background: "#8b5cf6", borderRadius: 10, transition: "width 0.3s" }} />
+      </div>
+    </div>
+  );
 
   function selectGroup(id, type) {
     if (selected === id && selectedType === type) { setSelected(null); setSelectedType(null); }
@@ -1673,7 +1686,15 @@ function CompaniesTab({ emails, meetings }) {
 
   const selectedCompany = companies.find(co => co.name === selected);
 
-  if (companiesLoading) return <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>⟳ Loading all companies… this may take a moment</div>;
+  const ctx = useContactsData();
+  if (companiesLoading) return (
+    <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>
+      <div style={{ marginBottom: 12 }}>⟳ Loading companies… {ctx?.progress || 0}%</div>
+      <div style={{ height: 4, background: "#1e1e2e", borderRadius: 10, width: 200, margin: "0 auto", overflow: "hidden" }}>
+        <div style={{ width: `${ctx?.progress || 0}%`, height: "100%", background: "#6366f1", borderRadius: 10, transition: "width 0.3s" }} />
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20 }}>
@@ -2196,6 +2217,7 @@ export default function CRM() {
   const loading = emailsCol.loading || meetingsCol.loading || groupsCol.loading;
 
   return (
+    <ContactsDataProvider>
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');
@@ -2250,6 +2272,7 @@ export default function CRM() {
         </div>
       </div>
     </>
+    </ContactsDataProvider>
   );
 }
 
