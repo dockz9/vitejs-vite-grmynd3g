@@ -501,7 +501,7 @@ async function callClaudeJSON(prompt, maxTokens = 1000) {
 }
 
 // ─── DASHBOARD TAB ────────────────────────────────────────────────────────────
-function DashboardTab({ contacts, emails, meetings, emailsCol }) {
+function DashboardTab({ contacts, emails, meetings, emailsCol, totalContacts, tasks = [] }) {
   const [nextActions, setNextActions] = useState(null);
   const [loadingActions, setLoadingActions] = useState(false);
   const [triageResults, setTriageResults] = useState(null);
