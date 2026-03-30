@@ -198,11 +198,14 @@ function ContactsDataProvider({ children }) {
               if (!hasName) companyMap[co].companyOnly = { id: d.id, ...data };
               else companyMap[co].contacts.push({ id: d.id, ...data });
             }
-            // Groups
-            const g = data.importGroups?.trim();
-            if (g) {
-              if (!grpMap[g]) grpMap[g] = [];
-              grpMap[g].push({ id: d.id, ...data });
+            // Groups - split by comma so each value is its own group
+            const gRaw = data.importGroups?.trim();
+            if (gRaw) {
+              const gList = gRaw.split(",").map(g => g.trim()).filter(Boolean);
+              gList.forEach(g => {
+                if (!grpMap[g]) grpMap[g] = [];
+                grpMap[g].push({ id: d.id, ...data });
+              });
             }
           });
 
@@ -1215,7 +1218,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
     if (!hasPersonalName) return false;
     const matchFilter = filter === "all" || c.status === filter;
     const matchGroup = groupFilter === "all" || (c.groups || []).includes(groupFilter);
-    const matchImportGroup = importGroupFilter === "all" || c.importGroups === importGroupFilter;
+    const matchImportGroup = importGroupFilter === "all" || (c.importGroups || "").split(",").map(g => g.trim()).includes(importGroupFilter);
     return matchFilter && matchGroup && matchImportGroup;
   });
 
@@ -1297,7 +1300,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
                   <span style={{ fontWeight: 700, fontSize: 14, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{c.lastName ? `${c.lastName}, ${c.firstName || ""}${c.middleName ? " " + c.middleName : ""}` : c.name || c.company}</span>
                   <StatusBadge status={c.status} />
                   {cGroups.map(g => <Tag key={g.id} color={g.color || "#6366f1"}>{g.name}</Tag>)}
-                  {c.importGroups && <Tag color="#8b5cf6">{c.importGroups}</Tag>}
+{(c.importGroups || "").split(",").map(g => g.trim()).filter(Boolean).map(g => <Tag key={g} color="#8b5cf6">{g}</Tag>)}
                 </div>
                 <div style={{ fontSize: 12, color: "#888", marginBottom: 6 }}>{c.jobTitle ? `${c.jobTitle} · ` : ""}{c.company}{c.primaryCity ? ` · ${c.primaryCity}` : c.metroArea ? ` · ${c.metroArea}` : ""}{c.industry ? ` · ${c.industry}` : ""}</div>
                 <HealthBar score={health.score} color={health.color} label={health.label} size="sm" />
