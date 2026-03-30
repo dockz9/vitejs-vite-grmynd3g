@@ -22,6 +22,7 @@ const firebaseConfig = {
 // ─── PASTE YOUR GOOGLE OAUTH CLIENT ID HERE ───────────────────────────────────
 const GMAIL_CLIENT_ID = "597640152215-h9luh049s6ghd0ajhsljh2sioqo2dsbd.apps.googleusercontent.com";
 // ─────────────────────────────────────────────────────────────────────────────
+
 // ─── PASTE YOUR NEWS API KEY HERE (free at newsapi.org) ──────────────────────
 const NEWS_API_KEY = "52d60ad3da4143bdbe827547aa3d406e";
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-const TABS = ["Dashboard", "Contacts", "Companies", "Groups", "Emails", "Meetings", "Tasks", "Pipeline", "Pitchdecks", "News", "Outreach"];
+const TABS = ["Dashboard", "Contacts", "Companies", "Groups", "Meetings", "Tasks", "Pipeline", "Pitchdecks", "News", "Outreach"];
 const STATUS_COLORS = {
   prospect: "#f59e0b", active: "#10b981", inactive: "#6b7280", customer: "#3b82f6",
 };
@@ -508,250 +509,218 @@ async function callClaudeJSON(prompt, maxTokens = 1000) {
 }
 
 // ─── DASHBOARD TAB ────────────────────────────────────────────────────────────
-function DashboardTab({ contacts, emails, meetings, emailsCol, totalContacts, tasks = [] }) {
-  const [nextActions, setNextActions] = useState(null);
-  const [loadingActions, setLoadingActions] = useState(false);
-  const [triageResults, setTriageResults] = useState(null);
-  const [loadingTriage, setLoadingTriage] = useState(false);
-  const [sentimentResults, setSentimentResults] = useState(null);
-  const [loadingSentiment, setLoadingSentiment] = useState(false);
+function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [] }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const PRIORITY_COLORS = { high: "#ef4444", medium: "#f59e0b", low: "#10b981" };
 
-  // Compute health scores for all contacts
-  const contactsWithHealth = contacts.map(c => ({
-    ...c,
-    health: calcHealthScore(c, emails, meetings)
-  })).sort((a, b) => a.health.score - b.health.score);
+  // Today's data
+  const todayMeetings = meetings.filter(m => m.date === today);
+  const completedTodayMeetings = todayMeetings.filter(m => m.status === "completed");
+  const todayTasks = tasks.filter(t => t.dueDate === today);
+  const completedTodayTasks = tasks.filter(t => t.status === "completed" && t.completedAt?.slice(0, 10) === today);
+  const todayEmails = emails.filter(e => e.date === today && e.direction === "sent");
 
+  // Upcoming (not today)
+  const upcomingMeetings = meetings.filter(m => m.status === "upcoming" && m.date > today).sort((a, b) => a.date.localeCompare(b.date));
+  const pendingTasks = tasks.filter(t => t.status === "pending").sort((a, b) => {
+    const order = { high: 0, medium: 1, low: 2 };
+    if (a.dueDate && b.dueDate && a.dueDate !== b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+    return (order[a.priority] || 1) - (order[b.priority] || 1);
+  });
+  const overdueTasks = pendingTasks.filter(t => t.dueDate && t.dueDate < today);
+
+  // Stats
+  const contactsWithHealth = contacts.map(c => ({ ...c, health: calcHealthScore(c, emails, meetings) }));
   const coldContacts = contactsWithHealth.filter(c => c.health.score < 50);
   const strongContacts = contactsWithHealth.filter(c => c.health.score >= 75);
-  const upcomingMeetings = meetings.filter(m => m.status === "upcoming").sort((a, b) => (a.date || "").localeCompare(b.date || "")).slice(0, 3);
+
+  // AI next actions
+  const [nextActions, setNextActions] = useState(null);
+  const [loadingActions, setLoadingActions] = useState(false);
 
   async function getNextActions() {
     setLoadingActions(true);
     try {
       const context = contacts.slice(0, 20).map(c => {
         const h = calcHealthScore(c, emails, meetings);
-        const lastEmail = emails.filter(e => e.contactId === c.id).sort((a, b) => b.date?.localeCompare(a.date || "")).slice(0, 1)[0];
-        return `${c.name} (${c.company}, ${c.status}, health: ${h.label}, days since contact: ${h.daysSince ?? "never"}, last email: ${lastEmail?.subject || "none"})`;
+        return `${c.name} (${c.company}, ${c.status}, health: ${h.label}, days since contact: ${h.daysSince ?? "never"})`;
       }).join("\n");
-      const result = await callClaudeJSON(`You are a CRM advisor. Based on these contacts and their relationship health, suggest the top 5 next best actions. Return ONLY a JSON array of objects with keys: "contactName", "action", "reason", "priority" (high/medium/low).\n\nContacts:\n${context}`);
+      const result = await callClaudeJSON(`You are a CRM advisor. Suggest the top 5 next best actions. Return ONLY a JSON array with keys: "contactName", "action", "reason", "priority" (high/medium/low).\n\nContacts:\n${context}`);
       setNextActions(result);
     } catch (e) { setNextActions([]); }
     setLoadingActions(false);
   }
 
-  async function triageEmails() {
-    setLoadingTriage(true);
-    try {
-      const recentEmails = emails.filter(e => e.direction === "received").sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 20);
-      if (recentEmails.length === 0) { setTriageResults({ urgent: [], later: [], trash: [] }); setLoadingTriage(false); return; }
-      const emailList = recentEmails.map((e, i) => {
-        const contact = contacts.find(c => c.id === e.contactId);
-        return `${i}: Subject: "${e.subject}" | From: ${contact?.name || "Unknown"} (${contact?.status || "unknown"}) | Date: ${e.date}`;
-      }).join("\n");
-      const result = await callClaudeJSON(`Triage these CRM emails into three categories. Return ONLY JSON with keys "urgent" (array of indices - needs response today), "later" (array of indices - can wait), "trash" (array of indices - newsletters/spam/irrelevant). Be aggressive with trash.\n\nEmails:\n${emailList}`);
-      const categorized = {
-        urgent: (result.urgent || []).map(i => recentEmails[i]).filter(Boolean),
-        later: (result.later || []).map(i => recentEmails[i]).filter(Boolean),
-        trash: (result.trash || []).map(i => recentEmails[i]).filter(Boolean),
-      };
-      setTriageResults(categorized);
-    } catch (e) { setTriageResults({ urgent: [], later: [], trash: [] }); }
-    setLoadingTriage(false);
+  function SectionHeader({ title, count, color = "#9999cc" }) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", fontSize: 13 }}>{title}</div>
+        {count !== undefined && <div style={{ fontSize: 11, fontWeight: 700, color, background: color + "20", border: `1px solid ${color}40`, borderRadius: 20, padding: "1px 8px" }}>{count}</div>}
+      </div>
+    );
   }
 
-  async function analyzeSentiment() {
-    setLoadingSentiment(true);
-    try {
-      const contactsWithEmails = contacts.filter(c => emails.some(e => e.contactId === c.id)).slice(0, 10);
-      const context = contactsWithEmails.map(c => {
-        const cEmails = emails.filter(e => e.contactId === c.id).sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 5);
-        return `${c.name} (${c.company}): ${cEmails.map(e => `[${e.direction}] "${e.subject}"`).join(", ")}`;
-      }).join("\n");
-      const result = await callClaudeJSON(`Analyze relationship sentiment based on email patterns. Return ONLY a JSON array of objects with keys: "contactName", "sentiment" (Warming/Neutral/Cooling/Cold), "trend" (up/flat/down), "insight" (one short sentence).\n\nContact email history:\n${context}`);
-      setSentimentResults(result);
-    } catch (e) { setSentimentResults([]); }
-    setLoadingSentiment(false);
+  function ActivityItem({ icon, label, sub, color = "#10b981", time }) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #1a1a2a" }}>
+        <div style={{ width: 28, height: 28, borderRadius: 8, background: color + "20", border: `1px solid ${color}30`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>{icon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+          {sub && <div style={{ fontSize: 11, color: "#666" }}>{sub}</div>}
+        </div>
+        {time && <div style={{ fontSize: 10, color: "#555", flexShrink: 0 }}>{time}</div>}
+      </div>
+    );
   }
-
-  const PRIORITY_COLORS = { high: "#ef4444", medium: "#f59e0b", low: "#10b981" };
 
   return (
-    <div style={{ display: "grid", gap: 24 }}>
+    <div style={{ display: "grid", gap: 20 }}>
 
       {/* Stats row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
         {[
-          { label: "Total contacts", value: contacts.length, color: "#6366f1" },
-          { label: "Cold relationships", value: coldContacts.length, color: "#ef4444" },
-          { label: "Strong relationships", value: strongContacts.length, color: "#10b981" },
-          { label: "Upcoming meetings", value: upcomingMeetings.length, color: "#3b82f6" },
+          { label: "Total Contacts", value: (totalContacts || contacts.length).toLocaleString(), color: "#6366f1" },
+          { label: "Strong Relationships", value: strongContacts.length, color: "#10b981" },
+          { label: "Cold Relationships", value: coldContacts.length, color: "#ef4444" },
+          { label: "Overdue Tasks", value: overdueTasks.length, color: "#f59e0b" },
         ].map(s => (
           <div key={s.label} style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: "16px 20px" }}>
             <div style={{ fontSize: 28, fontWeight: 800, color: s.color, fontFamily: "'Syne', sans-serif", lineHeight: 1 }}>{s.value}</div>
-            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{s.label}</div>
+            <div style={{ fontSize: 11, color: "#666", marginTop: 4 }}>{s.label}</div>
           </div>
         ))}
       </div>
 
-      {/* Relationship health overview */}
-      <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", marginBottom: 4 }}>Relationship Health</div>
-            <div style={{ fontSize: 12, color: "#666" }}>Based on email & meeting frequency</div>
-          </div>
-        </div>
-        <div style={{ display: "grid", gap: 10 }}>
-          {contactsWithHealth.slice(0, 8).map(c => (
-            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <Avatar name={c.name || "?"} size={28} />
-              <div style={{ width: 120, fontSize: 13, color: "#ccc", fontWeight: 600, flexShrink: 0 }}>{c.name}</div>
-              <div style={{ flex: 1 }}>
-                <HealthBar score={c.health.score} color={c.health.color} label={c.health.label} size="sm" />
-              </div>
-              <div style={{ fontSize: 11, color: "#555", width: 80, textAlign: "right", flexShrink: 0 }}>
-                {c.health.daysSince !== null ? `${c.health.daysSince}d ago` : "Never"}
-              </div>
+      {/* Main two-column layout */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+
+        {/* LEFT COLUMN — Today's Activity */}
+        <div style={{ display: "grid", gap: 16 }}>
+
+          {/* Today's date header */}
+          <div style={{ background: "#6366f115", border: "1px solid #6366f130", borderRadius: 12, padding: "14px 20px" }}>
+            <div style={{ fontSize: 11, color: "#6366f1", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Today</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+              {completedTodayMeetings.length} meetings · {completedTodayTasks.length} tasks · {todayEmails.length} emails sent
             </div>
-          ))}
-          {contacts.length === 0 && <div style={{ color: "#555", fontSize: 13, fontStyle: "italic" }}>Add contacts to see health scores.</div>}
-        </div>
-      </div>
-
-      {/* Three AI panels */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-
-        {/* Next best actions */}
-        <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", fontSize: 14, marginBottom: 4 }}>✦ Next Best Actions</div>
-            <div style={{ fontSize: 11, color: "#666" }}>AI-suggested outreach priorities</div>
           </div>
-          {!nextActions && <Btn size="sm" onClick={getNextActions} disabled={loadingActions || contacts.length === 0}>{loadingActions ? "✦ Thinking…" : "✦ Generate"}</Btn>}
-          {nextActions && (
-            <div style={{ display: "grid", gap: 10 }}>
-              {nextActions.slice(0, 5).map((a, i) => (
-                <div key={i} style={{ background: "#080810", borderRadius: 8, padding: "10px 12px", border: `1px solid ${PRIORITY_COLORS[a.priority]}30` }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: PRIORITY_COLORS[a.priority], textTransform: "uppercase" }}>{a.priority}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{a.contactName}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: "#ccc", marginBottom: 3 }}>{a.action}</div>
-                  <div style={{ fontSize: 11, color: "#555", fontStyle: "italic" }}>{a.reason}</div>
-                </div>
-              ))}
-              <Btn size="sm" variant="ghost" onClick={getNextActions} disabled={loadingActions}>{loadingActions ? "Refreshing…" : "↺ Refresh"}</Btn>
-            </div>
-          )}
-        </div>
 
-        {/* Email triage */}
-        <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", fontSize: 14, marginBottom: 4 }}>📬 Email Triage</div>
-            <div style={{ fontSize: 11, color: "#666" }}>Sort what needs attention</div>
+          {/* Completed today */}
+          <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
+            <SectionHeader title="Completed Today" count={completedTodayMeetings.length + completedTodayTasks.length + todayEmails.length} color="#10b981" />
+            {completedTodayMeetings.length === 0 && completedTodayTasks.length === 0 && todayEmails.length === 0 && (
+              <div style={{ fontSize: 12, color: "#444", fontStyle: "italic" }}>Nothing completed yet today — go Win This Moment!</div>
+            )}
+            {completedTodayMeetings.map(m => {
+              const contact = contacts.find(c => c.id === m.contactId);
+              return <ActivityItem key={m.id} icon="📅" label={m.title} sub={contact ? `${contact.lastName || contact.name} · ${m.time}` : m.time} color="#3b82f6" />;
+            })}
+            {completedTodayTasks.map(t => {
+              const contact = contacts.find(c => c.id === t.contactId);
+              return <ActivityItem key={t.id} icon="✓" label={t.title} sub={contact ? `${contact.lastName || contact.name}` : ""} color="#10b981" />;
+            })}
+            {todayEmails.map(e => {
+              const contact = contacts.find(c => c.id === e.contactId);
+              return <ActivityItem key={e.id} icon="✉" label={e.subject || "Email sent"} sub={contact ? `${contact.lastName || contact.name}` : ""} color="#6366f1" />;
+            })}
           </div>
-          {!triageResults && <Btn size="sm" onClick={triageEmails} disabled={loadingTriage || emails.length === 0}>{loadingTriage ? "✦ Sorting…" : "✦ Triage Emails"}</Btn>}
-          {triageResults && (
-            <div style={{ display: "grid", gap: 12 }}>
-              {[
-                { key: "urgent", label: "🔴 Urgent", color: "#ef4444" },
-                { key: "later", label: "🟡 Later", color: "#f59e0b" },
-                { key: "trash", label: "⚫ Trash", color: "#6b7280" },
-              ].map(cat => (
-                <div key={cat.key}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: cat.color, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>{cat.label} ({triageResults[cat.key]?.length || 0})</div>
-                  {(triageResults[cat.key] || []).slice(0, 3).map((e, i) => {
-                    const contact = contacts.find(c => c.id === e.contactId);
-                    return <div key={i} style={{ fontSize: 11, color: "#888", padding: "4px 0", borderBottom: "1px solid #1a1a2a" }}>{contact?.name || "?"} — {e.subject?.slice(0, 30)}{e.subject?.length > 30 ? "…" : ""}</div>;
-                  })}
-                  {(triageResults[cat.key] || []).length === 0 && <div style={{ fontSize: 11, color: "#444", fontStyle: "italic" }}>None</div>}
-                </div>
-              ))}
-              <Btn size="sm" variant="ghost" onClick={triageEmails} disabled={loadingTriage}>{loadingTriage ? "Re-sorting…" : "↺ Re-triage"}</Btn>
-            </div>
-          )}
-        </div>
 
-        {/* Sentiment analysis */}
-        <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", fontSize: 14, marginBottom: 4 }}>💬 Sentiment Tracker</div>
-            <div style={{ fontSize: 11, color: "#666" }}>Relationship temperature</div>
-          </div>
-          {!sentimentResults && <Btn size="sm" onClick={analyzeSentiment} disabled={loadingSentiment || emails.length === 0}>{loadingSentiment ? "✦ Analyzing…" : "✦ Analyze"}</Btn>}
-          {sentimentResults && (
-            <div style={{ display: "grid", gap: 10 }}>
-              {sentimentResults.slice(0, 6).map((s, i) => {
-                const SENT_COLORS = { Warming: "#10b981", Neutral: "#3b82f6", Cooling: "#f59e0b", Cold: "#ef4444" };
-                const TREND_ICONS = { up: "↑", flat: "→", down: "↓" };
-                const color = SENT_COLORS[s.sentiment] || "#888";
-                return (
-                  <div key={i} style={{ background: "#080810", borderRadius: 8, padding: "8px 10px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{s.contactName}</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, color, marginLeft: "auto" }}>{s.sentiment} {TREND_ICONS[s.trend]}</span>
+          {/* AI Next Best Actions */}
+          <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
+            <SectionHeader title="✦ Next Best Actions" color="#6366f1" />
+            {!nextActions && <Btn size="sm" onClick={getNextActions} disabled={loadingActions || contacts.length === 0}>{loadingActions ? "✦ Thinking…" : "✦ Generate"}</Btn>}
+            {nextActions && (
+              <div style={{ display: "grid", gap: 8 }}>
+                {nextActions.slice(0, 5).map((a, i) => (
+                  <div key={i} style={{ background: "#080810", borderRadius: 8, padding: "8px 12px", border: `1px solid ${PRIORITY_COLORS[a.priority]}30` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: PRIORITY_COLORS[a.priority], textTransform: "uppercase" }}>{a.priority}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{a.contactName}</span>
                     </div>
-                    <div style={{ fontSize: 11, color: "#666", fontStyle: "italic" }}>{s.insight}</div>
+                    <div style={{ fontSize: 11, color: "#aaa" }}>{a.action}</div>
                   </div>
-                );
-              })}
-              <Btn size="sm" variant="ghost" onClick={analyzeSentiment} disabled={loadingSentiment}>{loadingSentiment ? "Re-analyzing…" : "↺ Refresh"}</Btn>
-            </div>
-          )}
+                ))}
+                <Btn size="sm" variant="ghost" onClick={getNextActions} disabled={loadingActions}>↺ Refresh</Btn>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Upcoming meetings */}
-      {upcomingMeetings.length > 0 && (
-        <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
-          <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", marginBottom: 14 }}>📅 Upcoming Meetings</div>
-          <div style={{ display: "grid", gap: 10 }}>
-            {upcomingMeetings.map(m => {
+        {/* RIGHT COLUMN — Today's Plan */}
+        <div style={{ display: "grid", gap: 16 }}>
+
+          {/* Today's meetings */}
+          <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
+            <SectionHeader title="Today's Meetings" count={todayMeetings.length} color="#3b82f6" />
+            {todayMeetings.length === 0 && <div style={{ fontSize: 12, color: "#444", fontStyle: "italic" }}>No meetings today</div>}
+            {todayMeetings.sort((a, b) => (a.time || "").localeCompare(b.time || "")).map(m => {
               const contact = contacts.find(c => c.id === m.contactId);
               return (
-                <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "#080810", borderRadius: 8 }}>
-                  {contact && <Avatar name={contact.name} size={32} />}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff" }}>{m.title}</div>
-                    <div style={{ fontSize: 11, color: "#666" }}>{contact?.name} · {m.date} · {m.time}</div>
+                <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #1a1a2a" }}>
+                  <div style={{ width: 44, textAlign: "center", flexShrink: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#3b82f6" }}>{m.time}</div>
                   </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{m.title}</div>
+                    {contact && <div style={{ fontSize: 11, color: "#666" }}>{contact.lastName || contact.name}</div>}
+                  </div>
+                  <div style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: m.status === "completed" ? "#10b98120" : "#6366f120", color: m.status === "completed" ? "#10b981" : "#6366f1", border: `1px solid ${m.status === "completed" ? "#10b98140" : "#6366f140"}` }}>{m.status === "completed" ? "done" : "upcoming"}</div>
                 </div>
               );
             })}
           </div>
-        </div>
-      )}
 
-      {/* Pending tasks */}
-      {tasks && tasks.length > 0 && tasks.filter(t => t.status === "pending").length > 0 && (
-        <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
-          <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", marginBottom: 14, fontSize: 14 }}>
-            ✓ Pending Tasks ({tasks.filter(t => t.status === "pending").length})
-          </div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {tasks.filter(t => t.status === "pending").sort((a, b) => {
-              const order = { high: 0, medium: 1, low: 2 };
-              return (order[a.priority] || 1) - (order[b.priority] || 1);
-            }).slice(0, 5).map(t => {
-              const contact = contacts.find(c => c.id === t.contactId);
-              const isOverdue = t.dueDate && new Date(t.dueDate) < new Date();
-              const PRIORITY_COLORS = { high: "#ef4444", medium: "#f59e0b", low: "#10b981" };
+          {/* Upcoming meetings */}
+          <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
+            <SectionHeader title="Upcoming Meetings" count={upcomingMeetings.length} color="#6366f1" />
+            {upcomingMeetings.length === 0 && <div style={{ fontSize: 12, color: "#444", fontStyle: "italic" }}>No upcoming meetings</div>}
+            {upcomingMeetings.slice(0, 5).map(m => {
+              const contact = contacts.find(c => c.id === m.contactId);
               return (
-                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "#080810", borderRadius: 8, border: `1px solid ${isOverdue ? "#ef444430" : "#1a1a2a"}` }}>
+                <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #1a1a2a" }}>
+                  <div style={{ width: 52, textAlign: "center", flexShrink: 0 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#6366f1" }}>{m.date?.slice(5)}</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{m.title}</div>
+                    {contact && <div style={{ fontSize: 11, color: "#666" }}>{contact.lastName || contact.name}</div>}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#555" }}>{m.time}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Today's tasks + all pending */}
+          <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
+            <SectionHeader title="Tasks" count={pendingTasks.length} color="#f59e0b" />
+            {overdueTasks.length > 0 && (
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", marginBottom: 8 }}>⚠ {overdueTasks.length} overdue</div>
+            )}
+            {pendingTasks.length === 0 && <div style={{ fontSize: 12, color: "#444", fontStyle: "italic" }}>No pending tasks</div>}
+            {pendingTasks.slice(0, 8).map(t => {
+              const contact = contacts.find(c => c.id === t.contactId);
+              const isOverdue = t.dueDate && t.dueDate < today;
+              const isToday = t.dueDate === today;
+              return (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #1a1a2a" }}>
                   <div style={{ width: 8, height: 8, borderRadius: "50%", background: PRIORITY_COLORS[t.priority] || "#6366f1", flexShrink: 0 }} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff" }}>{t.title}</div>
-                    {contact && <div style={{ fontSize: 11, color: "#666" }}>{contact.lastName ? `${contact.lastName}, ${contact.firstName || ""}` : contact.name}</div>}
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{t.title}</div>
+                    {contact && <div style={{ fontSize: 11, color: "#666" }}>{contact.lastName || contact.name}</div>}
                   </div>
-                  {t.dueDate && <div style={{ fontSize: 11, color: isOverdue ? "#ef4444" : "#555" }}>{t.dueDate}</div>}
+                  {t.dueDate && (
+                    <div style={{ fontSize: 10, fontWeight: 700, color: isOverdue ? "#ef4444" : isToday ? "#f59e0b" : "#555", flexShrink: 0 }}>
+                      {isToday ? "Today" : isOverdue ? "Overdue" : t.dueDate?.slice(5)}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Cold contacts alert */}
       {coldContacts.length > 0 && (
@@ -2258,11 +2227,11 @@ export default function CRM() {
 
           <div style={{ animation: "fadeIn 0.2s ease" }} key={tab}>
             {loading ? <Spinner /> : <>
-              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} emailsCol={emailsCol} totalContacts={contactsCol.totalCount} tasks={tasksCol.docs} />}
+              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} totalContacts={contactsCol.totalCount} tasks={tasksCol.docs} />}
               {tab === "Contacts" && <ContactsTab contactsCol={contactsCol} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} />}
               {tab === "Companies" && <CompaniesTab emails={emailsCol.docs} meetings={meetingsCol.docs} />}
               {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} />}
-              {tab === "Emails" && <EmailsTab emails={emailsCol.docs} contacts={contactsCol.docs} emailsCol={emailsCol} gmailAccounts={gmailAccountsCol.docs} gmailAccountsCol={gmailAccountsCol} syncing={syncing} lastSync={lastSync} connectGmail={connectGmail} syncAll={syncAll} />}
+
               {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={contactsCol.docs} meetingsCol={meetingsCol} calConnected={calConnected} calSyncing={calSyncing} connectCalendar={connectCalendar} syncCalendar={syncCalendar} />}
               {tab === "Tasks" && <TasksTab contacts={contactsCol.docs} tasksCol={tasksCol} />}
               {tab === "Pipeline" && <PipelineTab contacts={contactsCol.docs} pipelinesCol={pipelinesCol} />}
