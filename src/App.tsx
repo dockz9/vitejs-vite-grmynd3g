@@ -718,7 +718,7 @@ function DashboardTab({ contacts, emails, meetings, emailsCol }) {
       )}
 
       {/* Pending tasks */}
-      {tasks && tasks.filter(t => t.status === "pending").length > 0 && (
+      {tasks && tasks.length > 0 && tasks.filter(t => t.status === "pending").length > 0 && (
         <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
           <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", marginBottom: 14, fontSize: 14 }}>
             ✓ Pending Tasks ({tasks.filter(t => t.status === "pending").length})
