@@ -1385,16 +1385,16 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
 
 // ─── GROUPS TAB ───────────────────────────────────────────────────────────────
 function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
+  const { groupMap, loading: groupsLoading } = useImportedGroups();
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", description: "", color: "#6366f1" });
   const [selected, setSelected] = useState(null);
-  const [selectedType, setSelectedType] = useState(null); // "manual" or "imported"
+  const [selectedType, setSelectedType] = useState(null);
   const [search, setSearch] = useState("");
   const COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ef4444","#06b6d4"];
 
-  // Get all unique imported groups from contacts
-  const importedGroups = [...new Set(contacts.map(c => c.importGroups).filter(Boolean))].sort();
+  const importedGroups = Object.keys(groupMap).sort();
 
   function openNew() { setForm({ name: "", description: "", color: "#6366f1" }); setEditing(null); setShowModal(true); }
   function openEdit(g) { setForm(g); setEditing(g); setShowModal(true); }
