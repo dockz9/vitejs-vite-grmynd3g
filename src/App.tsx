@@ -22,7 +22,6 @@ const firebaseConfig = {
 // ─── PASTE YOUR GOOGLE OAUTH CLIENT ID HERE ───────────────────────────────────
 const GMAIL_CLIENT_ID = "597640152215-h9luh049s6ghd0ajhsljh2sioqo2dsbd.apps.googleusercontent.com";
 // ─────────────────────────────────────────────────────────────────────────────
-
 // ─── PASTE YOUR NEWS API KEY HERE (free at newsapi.org) ──────────────────────
 const NEWS_API_KEY = "52d60ad3da4143bdbe827547aa3d406e";
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2233,7 +2232,7 @@ export default function CRM() {
         <div style={{ borderBottom: "1px solid #1a1a2a", padding: "18px 24px", display: "flex", alignItems: "center", gap: 16, background: "#0a0a12" }}>
           <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>◈</div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18, color: "#f0f0ff", letterSpacing: "-0.02em" }}>Nucleus CRM</div>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18, color: "#f0f0ff", letterSpacing: "-0.02em" }}>Win This Moment!</div>
             <div style={{ fontSize: 10, color: "#10b981", letterSpacing: "0.08em", textTransform: "uppercase" }}>● Live Cloud Sync</div>
           </div>
           <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
