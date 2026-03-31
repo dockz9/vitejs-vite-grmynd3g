@@ -79,11 +79,16 @@ function usePaginatedContacts() {
     setLoading(true);
     let q;
     if (page > 0 && lastDocs[page - 1]) {
-      q = query(collection(db, "contacts"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), orderBy("lastName"), orderBy("firstName"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
     } else {
-      q = query(collection(db, "contacts"), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), orderBy("lastName"), orderBy("firstName"), limit(PAGE_SIZE));
     }
-    getDocs(q).then(snap => {
+    getDocs(q).catch(() => {
+      // fallback if index not ready
+      return page > 0 && lastDocs[page - 1]
+        ? getDocs(query(collection(db, "contacts"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE)))
+        : getDocs(query(collection(db, "contacts"), limit(PAGE_SIZE)));
+    }).then(snap => {
       let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (snap.docs.length > 0) {
         setLastDocs(prev => ({ ...prev, [page]: snap.docs[snap.docs.length - 1] }));
