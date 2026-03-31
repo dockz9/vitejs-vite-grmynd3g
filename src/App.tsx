@@ -1441,9 +1441,9 @@ function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20 }}>
-      <div>
-        <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+    <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20, height: "calc(100vh - 220px)" }}>
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center", flexShrink: 0 }}>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search groups…" style={{ flex: 1, background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 14px", color: "#e0e0ff", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
           <Btn size="sm" onClick={openNew}>+ New</Btn>
         </div>
@@ -1706,13 +1706,14 @@ function CompaniesTab({ emails, meetings }) {
   );
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20 }}>
-      <div>
-        <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+    <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20, height: "calc(100vh - 220px)" }}>
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center", flexShrink: 0 }}>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search companies…" style={{ flex: 1, background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 14px", color: "#e0e0ff", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
           <button onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 12px", color: "#888", cursor: "pointer", fontSize: 12 }}>A-Z {sortDir === "asc" ? "↑" : "↓"}</button>
         </div>
-        <div style={{ fontSize: 12, color: "#555", marginBottom: 12 }}>{companies.length} companies</div>
+        <div style={{ fontSize: 12, color: "#555", marginBottom: 12, flexShrink: 0 }}>{companies.length} companies</div>
+        <div style={{ overflowY: "auto", flex: 1, paddingRight: 4 }}>
         <div style={{ display: "grid", gap: 8 }}>
           {companies.map(co => {
             const totalPeople = co.contacts.length;
@@ -1733,10 +1734,11 @@ function CompaniesTab({ emails, meetings }) {
           })}
           {companies.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No companies found.</div>}
         </div>
+        </div>
       </div>
 
       {selected && selectedCompany && (
-        <div>
+        <div style={{ display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
             <div style={{ width: 44, height: 44, borderRadius: 10, background: "#6366f120", border: "1px solid #6366f130", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 700, color: "#6366f1" }}>{selectedCompany.name[0]}</div>
             <div>
