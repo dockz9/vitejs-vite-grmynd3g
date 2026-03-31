@@ -59,9 +59,10 @@ const PAGE_SIZE = 50;
 function usePaginatedContacts() {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
-  const [lastDocs, setLastDocs] = useState({}); // cache of last doc per page
+  const [lastDocs, setLastDocs] = useState({});
   const [search, setSearchState] = useState("");
   const searchTimeout = useRef(null);
 
@@ -72,54 +73,86 @@ function usePaginatedContacts() {
     }).catch(() => {});
   }, []);
 
-  // Load page whenever page or search changes
+  // Load page (no search)
   useEffect(() => {
+    if (search) return; // search handled separately
     setLoading(true);
     let q;
-    if (search) {
-      q = query(collection(db, "contacts"), limit(500));
-    } else if (page > 0 && lastDocs[page - 1]) {
+    if (page > 0 && lastDocs[page - 1]) {
       q = query(collection(db, "contacts"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
     } else {
       q = query(collection(db, "contacts"), limit(PAGE_SIZE));
     }
-
     getDocs(q).then(snap => {
       let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      // Save last doc for next page cursor
-      if (!search && snap.docs.length > 0) {
+      if (snap.docs.length > 0) {
         setLastDocs(prev => ({ ...prev, [page]: snap.docs[snap.docs.length - 1] }));
       }
-
-      if (search) {
-        const sq = search.toLowerCase();
-        results = results.filter(c =>
-          c.name?.toLowerCase().includes(sq) ||
-          c.firstName?.toLowerCase().includes(sq) ||
-          c.lastName?.toLowerCase().includes(sq) ||
-          c.company?.toLowerCase().includes(sq) ||
-          c.email?.toLowerCase().includes(sq)
-        );
-      }
-
-      // Sort client-side by lastName then firstName
       results.sort((a, b) => {
         const aLast = (a.lastName || a.name || "").toLowerCase();
         const bLast = (b.lastName || b.name || "").toLowerCase();
         if (aLast !== bLast) return aLast.localeCompare(bLast);
-        const aFirst = (a.firstName || "").toLowerCase();
-        const bFirst = (b.firstName || "").toLowerCase();
-        return aFirst.localeCompare(bFirst);
+        return (a.firstName || "").toLowerCase().localeCompare((b.firstName || "").toLowerCase());
       });
-
       setDocs(results);
       setLoading(false);
-    }).catch(err => {
-      console.error("Firestore error:", err);
-      setLoading(false);
-    });
+    }).catch(() => setLoading(false));
   }, [page, search]);
+
+  // Full search across ALL contacts — loads in batches
+  useEffect(() => {
+    if (!search) return;
+    setSearching(true);
+    setDocs([]);
+
+    async function searchAll() {
+      const sq = search.toLowerCase();
+      const results = [];
+      let lastDoc = null;
+      const BATCH = 1000;
+
+      while (true) {
+        try {
+          const q = lastDoc
+            ? query(collection(db, "contacts"), startAfter(lastDoc), limit(BATCH))
+            : query(collection(db, "contacts"), limit(BATCH));
+          const snap = await getDocs(q);
+          if (snap.empty) break;
+
+          snap.docs.forEach(d => {
+            const c = { id: d.id, ...d.data() };
+            if (
+              c.name?.toLowerCase().includes(sq) ||
+              c.firstName?.toLowerCase().includes(sq) ||
+              c.lastName?.toLowerCase().includes(sq) ||
+              c.company?.toLowerCase().includes(sq) ||
+              c.email?.toLowerCase().includes(sq) ||
+              c.jobTitle?.toLowerCase().includes(sq) ||
+              c.metroArea?.toLowerCase().includes(sq) ||
+              c.industry?.toLowerCase().includes(sq)
+            ) {
+              results.push(c);
+            }
+          });
+
+          // Show results as they come in
+          setDocs([...results].sort((a, b) => {
+            const aLast = (a.lastName || a.name || "").toLowerCase();
+            const bLast = (b.lastName || b.name || "").toLowerCase();
+            if (aLast !== bLast) return aLast.localeCompare(bLast);
+            return (a.firstName || "").toLowerCase().localeCompare((b.firstName || "").toLowerCase());
+          }));
+
+          lastDoc = snap.docs[snap.docs.length - 1];
+          if (snap.docs.length < BATCH) break;
+          await new Promise(r => setTimeout(r, 50));
+        } catch (e) { break; }
+      }
+      setSearching(false);
+    }
+
+    searchAll();
+  }, [search]);
 
   function nextPage() {
     if (lastDocs[page]) setPage(p => p + 1);
@@ -148,7 +181,7 @@ function usePaginatedContacts() {
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  return { docs, loading, totalCount, totalPages, page, nextPage, prevPage, add, update, remove, doSearch, search };
+  return { docs, loading: loading || searching, searching, totalCount, totalPages, page, nextPage, prevPage, add, update, remove, doSearch, search };
 }
 
 // Hook to load all companies from contacts efficiently
@@ -1237,7 +1270,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
       {/* Page info + filter bar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 12, color: "#555" }}>
-          {search ? `${filtered.length} results` : `${totalCount.toLocaleString()} total · page ${page + 1} of ${totalPages || 1}`}
+          {search ? (contactsCol.searching ? `⟳ Searching all ${totalCount.toLocaleString()} contacts…` : `${filtered.length} results for "${search}"`) : `${totalCount.toLocaleString()} total · page ${page + 1} of ${totalPages || 1}`}
         </span>
         {importGroups.length > 0 && (
           <select value={importGroupFilter} onChange={e => setImportGroupFilter(e.target.value)} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "4px 10px", color: "#e0e0ff", fontSize: 12, fontFamily: "inherit", outline: "none" }}>
@@ -2246,5 +2279,4 @@ export default function CRM() {
     </ContactsDataProvider>
   );
 }
-
 
