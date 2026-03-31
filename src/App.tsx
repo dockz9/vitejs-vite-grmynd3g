@@ -17,6 +17,7 @@ const firebaseConfig = {
   messagingSenderId: "631776362334",
   appId: "1:631776362334:web:b886d3684885884d0259cf",
 };
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── PASTE YOUR GOOGLE OAUTH CLIENT ID HERE ───────────────────────────────────
@@ -79,16 +80,11 @@ function usePaginatedContacts() {
     setLoading(true);
     let q;
     if (page > 0 && lastDocs[page - 1]) {
-      q = query(collection(db, "contacts"), orderBy("lastName"), orderBy("firstName"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
     } else {
-      q = query(collection(db, "contacts"), orderBy("lastName"), orderBy("firstName"), limit(PAGE_SIZE));
+      q = query(collection(db, "contacts"), limit(PAGE_SIZE));
     }
-    getDocs(q).catch(() => {
-      // fallback if index not ready
-      return page > 0 && lastDocs[page - 1]
-        ? getDocs(query(collection(db, "contacts"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE)))
-        : getDocs(query(collection(db, "contacts"), limit(PAGE_SIZE)));
-    }).then(snap => {
+    getDocs(q).then(snap => {
       let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (snap.docs.length > 0) {
         setLastDocs(prev => ({ ...prev, [page]: snap.docs[snap.docs.length - 1] }));
