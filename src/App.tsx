@@ -1214,8 +1214,8 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
 
   // Client-side filter on top of server-paginated results
   const filtered = contactsWithNames.filter(c => {
-    // Hide company-only entries (no personal name) from contacts page
-    const hasPersonalName = c.firstName || c.lastName || (c.name && c.name !== c.company);
+    // Hide company-only entries - only hide if no name fields at all
+    const hasPersonalName = c.firstName || c.lastName || c.name;
     if (!hasPersonalName) return false;
     const matchFilter = filter === "all" || c.status === filter;
     const matchGroup = groupFilter === "all" || (c.groups || []).includes(groupFilter);
