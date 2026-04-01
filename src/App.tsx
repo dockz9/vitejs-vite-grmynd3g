@@ -1284,8 +1284,9 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
         </div>
       </div>
 
+      {contactsLoading && <Spinner />}
       <div style={{ display: "grid", gap: 10 }}>
-        {filtered.map(c => {
+        {!contactsLoading && filtered.map(c => {
           const health = calcHealthScore(c, emails, meetings);
           const cEmails = emails.filter(e => e.contactId === c.id).length;
           const cMeetings = meetings.filter(m => m.contactId === c.id).length;
@@ -1317,7 +1318,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
             </div>
           );
         })}
-        {filtered.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "60px 0", fontStyle: "italic" }}>No contacts found.</div>}
+        {!contactsLoading && filtered.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "60px 0", fontStyle: "italic" }}>No contacts found.</div>}
       </div>
       {showDetail && <ContactDetailModal contact={showDetail} onClose={() => setShowDetail(null)} onEdit={openEdit} emails={emails} meetings={meetings} />}
       {showImport && <CSVImportModal onClose={() => setShowImport(false)} contactsCol={contactsCol} />}
