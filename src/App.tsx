@@ -64,19 +64,23 @@ function usePaginatedContacts() {
   const [page, setPage] = useState(0);
   const [lastDocs, setLastDocs] = useState({});
   const [search, setSearchState] = useState("");
+  const [error, setError] = useState(null);
   const searchTimeout = useRef(null);
 
   // Get total count once
   useEffect(() => {
     getCountFromServer(collection(db, "contacts")).then(snap => {
       setTotalCount(snap.data().count);
-    }).catch(() => {});
+    }).catch(() => {
+      // Count failed — try to estimate from first batch
+    });
   }, []);
 
   // Load page (no search)
   useEffect(() => {
     if (search) return; // search handled separately
     setLoading(true);
+    setError(null);
     let q;
     if (page > 0 && lastDocs[page - 1]) {
       q = query(collection(db, "contacts"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
@@ -87,6 +91,8 @@ function usePaginatedContacts() {
       let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (snap.docs.length > 0) {
         setLastDocs(prev => ({ ...prev, [page]: snap.docs[snap.docs.length - 1] }));
+        // If we don't have a count yet, estimate
+        if (totalCount === 0) setTotalCount(snap.docs.length);
       }
       results.sort((a, b) => {
         const aLast = (a.lastName || a.name || "").toLowerCase();
@@ -96,7 +102,11 @@ function usePaginatedContacts() {
       });
       setDocs(results);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch(err => {
+      console.error("Contacts load error:", err);
+      setError(err.message || "Failed to load contacts");
+      setLoading(false);
+    });
   }, [page, search]);
 
   // Full search across ALL contacts — loads in batches
@@ -181,11 +191,12 @@ function usePaginatedContacts() {
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  return { docs, loading: loading || searching, searching, totalCount, totalPages, page, nextPage, prevPage, add, update, remove, doSearch, search };
+  return { docs, loading: loading || searching, searching, totalCount, totalPages, page, nextPage, prevPage, add, update, remove, doSearch, search, error };
 }
 
-// Hook to load all companies from contacts efficiently
-// Single hook that loads companies AND groups in one pass
+// ─── GLOBAL CONTACTS CONTEXT ──────────────────────────────────────────────────
+// Loads ALL contacts once on startup with progress bar.
+// Dashboard, Gmail sync, follow-ups, Companies, Groups all use this.
 const ContactsDataContext = React.createContext(null);
 
 function useContactsData() {
@@ -193,24 +204,47 @@ function useContactsData() {
 }
 
 function ContactsDataProvider({ children }) {
+  const [allContacts, setAllContacts] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [groupMap, setGroupMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loadError, setLoadError] = useState(null);
+
+  async function addContact(data) {
+    const docRef = await addDoc(collection(db, "contacts"), data);
+    const newDoc = { id: docRef.id, ...data };
+    setAllContacts(prev => [...prev, newDoc]);
+    setTotalCount(c => c + 1);
+    return docRef;
+  }
+  async function updateContact(id, data) {
+    await updateDoc(doc(db, "contacts", id), data);
+    setAllContacts(prev => prev.map(c => c.id === id ? { ...c, ...data } : c));
+  }
+  async function removeContact(id) {
+    await deleteDoc(doc(db, "contacts", id));
+    setAllContacts(prev => prev.filter(c => c.id !== id));
+    setTotalCount(c => c - 1);
+  }
 
   useEffect(() => {
     async function loadAll() {
       setLoading(true);
+      setLoadError(null);
+      const allDocs = [];
       const companyMap = {};
       const grpMap = {};
       let lastDoc = null;
       const BATCH = 1000;
-      let total = 0;
+      let total = 34000;
 
       try {
         const countSnap = await getCountFromServer(collection(db, "contacts"));
         total = countSnap.data().count;
-      } catch(e) { total = 30000; }
+        setTotalCount(total);
+      } catch(e) {}
 
       let loaded = 0;
       while (true) {
@@ -223,38 +257,50 @@ function ContactsDataProvider({ children }) {
 
           snap.docs.forEach(d => {
             const data = d.data();
-            // Companies
+            const contact = { id: d.id, ...data };
+            allDocs.push(contact);
+
             const co = data.company?.trim();
             if (co) {
               if (!companyMap[co]) companyMap[co] = { name: co, contacts: [], companyOnly: null };
               const hasName = data.firstName || data.lastName || (data.name && data.name !== co);
-              if (!hasName) companyMap[co].companyOnly = { id: d.id, ...data };
-              else companyMap[co].contacts.push({ id: d.id, ...data });
+              if (!hasName) companyMap[co].companyOnly = contact;
+              else companyMap[co].contacts.push(contact);
             }
-            // Groups - split by comma so each value is its own group
+
             const gRaw = data.importGroups?.trim();
             if (gRaw) {
-              const gList = gRaw.split(",").map(g => g.trim()).filter(Boolean);
-              gList.forEach(g => {
+              gRaw.split(",").map(g => g.trim()).filter(Boolean).forEach(g => {
                 if (!grpMap[g]) grpMap[g] = [];
-                grpMap[g].push({ id: d.id, ...data });
+                grpMap[g].push(contact);
               });
             }
           });
 
           loaded += snap.docs.length;
-          setProgress(Math.round((loaded / total) * 100));
+          setProgress(Math.min(99, Math.round((loaded / total) * 100)));
           lastDoc = snap.docs[snap.docs.length - 1];
           if (snap.docs.length < BATCH) break;
           await new Promise(r => setTimeout(r, 50));
         } catch(e) {
-          console.error("Load error:", e);
+          console.error("Contacts load error:", e);
+          setLoadError(e.message || "Failed to load contacts");
           break;
         }
       }
 
+      allDocs.sort((a, b) => {
+        const aLast = (a.lastName || a.name || "").toLowerCase();
+        const bLast = (b.lastName || b.name || "").toLowerCase();
+        if (aLast !== bLast) return aLast.localeCompare(bLast);
+        return (a.firstName || "").toLowerCase().localeCompare((b.firstName || "").toLowerCase());
+      });
+
+      setAllContacts(allDocs);
+      setTotalCount(allDocs.length);
       setCompanies(Object.values(companyMap).sort((a, b) => a.name.localeCompare(b.name)));
       setGroupMap(grpMap);
+      setProgress(100);
       setLoading(false);
     }
 
@@ -262,7 +308,7 @@ function ContactsDataProvider({ children }) {
   }, []);
 
   return (
-    <ContactsDataContext.Provider value={{ companies, groupMap, loading, progress }}>
+    <ContactsDataContext.Provider value={{ allContacts, companies, groupMap, loading, progress, totalCount, loadError, addContact, updateContact, removeContact }}>
       {children}
     </ContactsDataContext.Provider>
   );
@@ -1301,7 +1347,7 @@ function ContactDetailModal({ contact, onClose, onEdit, emails, meetings }) {
 
 // ─── CONTACTS TAB ─────────────────────────────────────────────────────────────
 function ContactsTab({ contactsCol, emails, meetings, groups }) {
-  const { docs: contacts, loading: contactsLoading, totalCount, totalPages, page, nextPage, prevPage, doSearch, search } = contactsCol;
+  const { docs: contacts, loading: contactsLoading, totalCount, totalPages, page, nextPage, prevPage, doSearch, search, error: contactsError } = contactsCol;
   const [searchInput, setSearchInput] = useState("");
   const [filter, setFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -1396,6 +1442,12 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
         </div>
       </div>
 
+      {contactsError && (
+        <div style={{ background: "#ef444415", border: "1px solid #ef444440", borderRadius: 10, padding: "14px 18px", marginBottom: 16, fontSize: 13, color: "#ef4444" }}>
+          ⚠️ <strong>Firebase error:</strong> {contactsError}
+          <div style={{ marginTop: 6, fontSize: 12, color: "#888" }}>Check that your Firebase config is correct and Firestore rules allow reads.</div>
+        </div>
+      )}
       {contactsLoading && <Spinner />}
       <div style={{ display: "grid", gap: 10 }}>
         {!contactsLoading && filtered.map(c => {
@@ -2320,9 +2372,10 @@ function OutreachTab({ contacts }) {
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-export default function CRM() {
+// Inner app — has access to ContactsDataContext
+function CRMInner() {
   const [tab, setTab] = useState("Dashboard");
-  const contactsCol = usePaginatedContacts();
+  const { allContacts, loading: contactsLoading, progress, totalCount, loadError, addContact, updateContact, removeContact } = useContactsData();
   const emailsCol = useCollection("emails");
   const meetingsCol = useCollection("meetings");
   const groupsCol = useCollection("groups");
@@ -2330,13 +2383,46 @@ export default function CRM() {
   const pipelinesCol = useCollection("pipeline");
   const tasksCol = useCollection("tasks");
 
-  const { syncing, lastSync, connectGmail, syncAll } = useGmailSync(contactsCol.docs, emailsCol, gmailAccountsCol.docs);
-  const { calConnected, syncing: calSyncing, connectCalendar, syncCalendar } = useGoogleCalendar(contactsCol.docs, meetingsCol);
+  // Wrap global contacts into the shape ContactsTab expects
+  const contactsCol = {
+    docs: allContacts,
+    loading: contactsLoading,
+    searching: false,
+    totalCount,
+    totalPages: Math.ceil(totalCount / 50),
+    page: 0,
+    nextPage: () => {},
+    prevPage: () => {},
+    add: addContact,
+    update: updateContact,
+    remove: removeContact,
+    doSearch: () => {},
+    search: "",
+    error: loadError,
+  };
+
+  const { syncing, lastSync, connectGmail, syncAll } = useGmailSync(allContacts, emailsCol, gmailAccountsCol.docs);
+  const { calConnected, syncing: calSyncing, connectCalendar, syncCalendar } = useGoogleCalendar(allContacts, meetingsCol);
 
   const loading = emailsCol.loading || meetingsCol.loading || groupsCol.loading;
 
+  // Show loading screen while contacts are being fetched
+  if (contactsLoading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#080810", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono', monospace", color: "#e0e0ff" }}>
+        <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, marginBottom: 24 }}>◈</div>
+        <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 22, color: "#f0f0ff", marginBottom: 8 }}>Win This Moment!</div>
+        <div style={{ fontSize: 13, color: "#888", marginBottom: 32 }}>Loading your contacts…</div>
+        <div style={{ width: 320, background: "#1a1a2a", borderRadius: 10, height: 8, overflow: "hidden", marginBottom: 12 }}>
+          <div style={{ width: `${progress}%`, height: "100%", background: "linear-gradient(90deg, #6366f1, #8b5cf6)", borderRadius: 10, transition: "width 0.3s ease" }} />
+        </div>
+        <div style={{ fontSize: 12, color: "#555" }}>{progress}% · {totalCount > 0 ? `${Math.round(totalCount * progress / 100).toLocaleString()} of ${totalCount.toLocaleString()} contacts` : "Connecting to Firebase…"}</div>
+        {loadError && <div style={{ marginTop: 20, color: "#ef4444", fontSize: 13, background: "#ef444415", border: "1px solid #ef444430", borderRadius: 8, padding: "10px 18px" }}>⚠️ {loadError}</div>}
+      </div>
+    );
+  }
+
   return (
-    <ContactsDataProvider>
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');
@@ -2375,22 +2461,28 @@ export default function CRM() {
 
           <div style={{ animation: "fadeIn 0.2s ease" }} key={tab}>
             {loading ? <Spinner /> : <>
-              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} totalContacts={contactsCol.totalCount} tasks={tasksCol.docs} tasksCol={tasksCol} gmailAccounts={gmailAccountsCol.docs} connectGmail={connectGmail} syncing={syncing} lastSync={lastSync} />}
+              {tab === "Dashboard" && <DashboardTab contacts={allContacts} emails={emailsCol.docs} meetings={meetingsCol.docs} totalContacts={totalCount} tasks={tasksCol.docs} tasksCol={tasksCol} gmailAccounts={gmailAccountsCol.docs} connectGmail={connectGmail} syncing={syncing} lastSync={lastSync} />}
               {tab === "Contacts" && <ContactsTab contactsCol={contactsCol} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} />}
               {tab === "Companies" && <CompaniesTab emails={emailsCol.docs} meetings={meetingsCol.docs} />}
-              {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} />}
-
-              {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={contactsCol.docs} meetingsCol={meetingsCol} calConnected={calConnected} calSyncing={calSyncing} connectCalendar={connectCalendar} syncCalendar={syncCalendar} />}
-              {tab === "Tasks" && <TasksTab contacts={contactsCol.docs} tasksCol={tasksCol} />}
-              {tab === "Pipeline" && <PipelineTab contacts={contactsCol.docs} pipelinesCol={pipelinesCol} />}
-              {tab === "Pitchdecks" && <PitchdecksTab contacts={contactsCol.docs} />}
-              {tab === "News" && <NewsTab contacts={contactsCol.docs} />}
-              {tab === "Outreach" && <OutreachTab contacts={contactsCol.docs} />}
+              {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={allContacts} contactsCol={contactsCol} />}
+              {tab === "Meetings" && <MeetingsTab meetings={meetingsCol.docs} contacts={allContacts} meetingsCol={meetingsCol} calConnected={calConnected} calSyncing={calSyncing} connectCalendar={connectCalendar} syncCalendar={syncCalendar} />}
+              {tab === "Tasks" && <TasksTab contacts={allContacts} tasksCol={tasksCol} />}
+              {tab === "Pipeline" && <PipelineTab contacts={allContacts} pipelinesCol={pipelinesCol} />}
+              {tab === "Pitchdecks" && <PitchdecksTab contacts={allContacts} />}
+              {tab === "News" && <NewsTab contacts={allContacts} />}
+              {tab === "Outreach" && <OutreachTab contacts={allContacts} />}
             </>}
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+export default function CRM() {
+  return (
+    <ContactsDataProvider>
+      <CRMInner />
     </ContactsDataProvider>
   );
 }
