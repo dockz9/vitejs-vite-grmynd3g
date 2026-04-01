@@ -542,7 +542,7 @@ async function callClaudeJSON(prompt, maxTokens = 1000) {
 }
 
 // ─── DASHBOARD TAB ────────────────────────────────────────────────────────────
-function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [] }) {
+function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], tasksCol, gmailAccounts = [], connectGmail, syncing, lastSync }) {
   const today = new Date().toISOString().slice(0, 10);
   const PRIORITY_COLORS = { high: "#ef4444", medium: "#f59e0b", low: "#10b981" };
 
@@ -566,6 +566,69 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [] })
   const contactsWithHealth = contacts.map(c => ({ ...c, health: calcHealthScore(c, emails, meetings) }));
   const coldContacts = contactsWithHealth.filter(c => c.health.score < 50);
   const strongContacts = contactsWithHealth.filter(c => c.health.score >= 75);
+
+  // Follow-up tracker: emails you sent with no reply in 22+ days
+  const FOLLOWUP_DAYS = 22;
+  const followUps = React.useMemo(() => {
+    const now = new Date();
+    const results = [];
+    const sentEmails = emails.filter(e => e.direction === "sent");
+    
+    sentEmails.forEach(sent => {
+      const sentDate = new Date(sent.date);
+      const daysSince = Math.floor((now - sentDate) / 86400000);
+      if (daysSince < FOLLOWUP_DAYS) return;
+      
+      // Check if they replied after this email
+      const replied = emails.some(e => 
+        e.contactId === sent.contactId && 
+        e.direction === "received" && 
+        new Date(e.date) > sentDate
+      );
+      if (replied) return;
+
+      // Check if we already have a follow-up task for this contact
+      const hasTask = tasks.some(t => 
+        t.contactId === sent.contactId && 
+        t.status === "pending" && 
+        t.followUpEmailId === sent.id
+      );
+      
+      const contact = contacts.find(c => c.id === sent.contactId);
+      if (!contact) return;
+
+      results.push({ 
+        contact, 
+        email: sent, 
+        daysSince,
+        hasTask
+      });
+    });
+
+    // Deduplicate by contact — only show most recent unanswered email per contact
+    const seen = new Set();
+    return results
+      .sort((a, b) => b.daysSince - a.daysSince)
+      .filter(r => {
+        if (seen.has(r.contact.id)) return false;
+        seen.add(r.contact.id);
+        return true;
+      });
+  }, [emails, contacts, tasks]);
+
+  async function createFollowUpTask(followUp) {
+    if (!tasksCol) return;
+    await tasksCol.add({
+      contactId: followUp.contact.id,
+      title: `Follow up with ${followUp.contact.name || followUp.contact.lastName}`,
+      notes: `No reply to: "${followUp.email.subject}" sent ${followUp.daysSince} days ago`,
+      dueDate: new Date().toISOString().slice(0, 10),
+      priority: "high",
+      status: "pending",
+      followUpEmailId: followUp.email.id,
+      createdAt: new Date().toISOString(),
+    });
+  }
 
   // AI next actions
   const [nextActions, setNextActions] = useState(null);
@@ -608,6 +671,25 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [] })
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
+
+      {/* Gmail status bar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#0d0d14", border: `1px solid ${gmailAccounts.length ? "#10b98130" : "#ef444430"}`, borderRadius: 10, padding: "10px 16px" }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: gmailAccounts.length ? (syncing ? "#f59e0b" : "#10b981") : "#ef4444", flexShrink: 0 }} />
+        <div style={{ flex: 1, fontSize: 12, color: "#888" }}>
+          {gmailAccounts.length 
+            ? `Gmail connected${gmailAccounts.length > 1 ? ` (${gmailAccounts.length} accounts)` : ""} · ${syncing ? "Syncing…" : lastSync ? `Last sync: ${lastSync.toLocaleTimeString()}` : "Waiting to sync"}`
+            : "Gmail not connected — follow-up tracking requires Gmail"
+          }
+        </div>
+        {!gmailAccounts.length && connectGmail && (
+          <Btn size="sm" onClick={connectGmail}>Connect Gmail</Btn>
+        )}
+        {gmailAccounts.length > 0 && followUps.length > 0 && (
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", background: "#f59e0b20", padding: "2px 8px", borderRadius: 20, border: "1px solid #f59e0b40" }}>
+            {followUps.length} follow-up{followUps.length !== 1 ? "s" : ""} needed
+          </span>
+        )}
+      </div>
 
       {/* Stats row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
@@ -658,6 +740,36 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [] })
               return <ActivityItem key={e.id} icon="✉" label={e.subject || "Email sent"} sub={contact ? `${contact.lastName || contact.name}` : ""} color="#6366f1" />;
             })}
           </div>
+
+          {/* Follow-up tracker */}
+          {followUps.length > 0 && (
+            <div style={{ background: "#0d0d14", border: "1px solid #f59e0b30", borderRadius: 12, padding: 20 }}>
+              <SectionHeader title="⏰ Follow-Ups Needed" count={followUps.length} color="#f59e0b" />
+              <div style={{ display: "grid", gap: 8 }}>
+                {followUps.slice(0, 5).map((f, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#080810", borderRadius: 8, border: "1px solid #f59e0b20" }}>
+                    <Avatar name={f.contact.name || "?"} size={28} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {f.contact.lastName ? `${f.contact.lastName}, ${f.contact.firstName || ""}` : f.contact.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        "{f.email.subject}" · {f.daysSince}d ago
+                      </div>
+                    </div>
+                    {!f.hasTask ? (
+                      <Btn size="sm" onClick={() => createFollowUpTask(f)} style={{ flexShrink: 0 }}>+ Task</Btn>
+                    ) : (
+                      <span style={{ fontSize: 10, color: "#10b981", flexShrink: 0 }}>✓ task created</span>
+                    )}
+                  </div>
+                ))}
+                {followUps.length > 5 && (
+                  <div style={{ fontSize: 11, color: "#555", textAlign: "center" }}>+{followUps.length - 5} more follow-ups</div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* AI Next Best Actions */}
           <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
@@ -2263,7 +2375,7 @@ export default function CRM() {
 
           <div style={{ animation: "fadeIn 0.2s ease" }} key={tab}>
             {loading ? <Spinner /> : <>
-              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} totalContacts={contactsCol.totalCount} tasks={tasksCol.docs} />}
+              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} totalContacts={contactsCol.totalCount} tasks={tasksCol.docs} tasksCol={tasksCol} gmailAccounts={gmailAccountsCol.docs} connectGmail={connectGmail} syncing={syncing} lastSync={lastSync} />}
               {tab === "Contacts" && <ContactsTab contactsCol={contactsCol} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} />}
               {tab === "Companies" && <CompaniesTab emails={emailsCol.docs} meetings={meetingsCol.docs} />}
               {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} />}
