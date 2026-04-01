@@ -237,7 +237,7 @@ function ContactsDataProvider({ children }) {
       const companyMap = {};
       const grpMap = {};
       let lastDoc = null;
-      const BATCH = 1000;
+      const BATCH = 500;
       let total = 34000;
 
       try {
@@ -281,13 +281,16 @@ function ContactsDataProvider({ children }) {
           setProgress(Math.min(99, Math.round((loaded / total) * 100)));
           lastDoc = snap.docs[snap.docs.length - 1];
           if (snap.docs.length < BATCH) break;
-          await new Promise(r => setTimeout(r, 50));
+          await new Promise(r => setTimeout(r, 150)); // give browser time to breathe
         } catch(e) {
           console.error("Contacts load error:", e);
           setLoadError(e.message || "Failed to load contacts");
           break;
         }
       }
+
+      // Small pause so progress bar can render 99% before we do the heavy sort
+      await new Promise(r => setTimeout(r, 100));
 
       allDocs.sort((a, b) => {
         const aLast = (a.lastName || a.name || "").toLowerCase();
@@ -301,6 +304,8 @@ function ContactsDataProvider({ children }) {
       setCompanies(Object.values(companyMap).sort((a, b) => a.name.localeCompare(b.name)));
       setGroupMap(grpMap);
       setProgress(100);
+      // Another small pause so React can commit the state before we hide the loading screen
+      await new Promise(r => setTimeout(r, 200));
       setLoading(false);
     }
 
