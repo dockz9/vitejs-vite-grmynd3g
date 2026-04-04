@@ -56,80 +56,42 @@ function useCollection(name) {
 
 // Paginated hook for large collections like contacts
 const PAGE_SIZE = 50;
-function usePaginatedContacts() {
-  const [docs, setDocs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
-  const [totalCount, setTotalCount] = useState(0);
-  const [page, setPage] = useState(0);
-  const [lastDocs, setLastDocs] = useState({});
-  const [search, setSearchState] = useState("");
-  const [error, setError] = useState(null);
-  const searchTimeout = useRef(null);
 
-  // Get total count once
+const BACKEND_URL = "https://crm-backend-production-77b8.up.railway.app";
+
+function useCompanies() {
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
-    getCountFromServer(collection(db, "contacts")).then(snap => {
-      setTotalCount(snap.data().count);
-    }).catch(() => {
-      // Count failed — try to estimate from first batch
-    });
+    fetch(`${BACKEND_URL}/companies`)
+      .then(r => r.json())
+      .then(data => {
+        setCompanies(data.companies || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
-  // Load page (no search)
+  return { companies, loading };
+}
+
+function useImportedGroups() {
+  const [groupMap, setGroupMap] = useState({});
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
-    if (search) return; // search handled separately
-    setLoading(true);
-    setError(null);
-    let q;
-    if (page > 0 && lastDocs[page - 1]) {
-      q = query(collection(db, "contacts"), startAfter(lastDocs[page - 1]), limit(PAGE_SIZE));
-    } else {
-      q = query(collection(db, "contacts"), limit(PAGE_SIZE));
-    }
-    getDocs(q).then(snap => {
-      let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (snap.docs.length > 0) {
-        setLastDocs(prev => ({ ...prev, [page]: snap.docs[snap.docs.length - 1] }));
-        // If we don't have a count yet, estimate
-        if (totalCount === 0) setTotalCount(snap.docs.length);
-      }
-      results.sort((a, b) => {
-        const aLast = (a.lastName || a.name || "").toLowerCase();
-        const bLast = (b.lastName || b.name || "").toLowerCase();
-        if (aLast !== bLast) return aLast.localeCompare(bLast);
-        return (a.firstName || "").toLowerCase().localeCompare((b.firstName || "").toLowerCase());
-      });
-      setDocs(results);
-      setLoading(false);
-    }).catch(err => {
-      console.error("Contacts load error:", err);
-      setError(err.message || "Failed to load contacts");
-      setLoading(false);
-    });
-  }, [page, search]);
+    fetch(`${BACKEND_URL}/groups`)
+      .then(r => r.json())
+      .then(data => {
+        setGroupMap(data.groups || {});
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
 
-  // Search via backend — instant, searches all 34,000 contacts
-  const BACKEND_URL = "https://crm-backend-production-77b8.up.railway.app";
-  useEffect(() => {
-    if (!search) return;
-    setSearching(true);
-    setDocs([]);
-
-    async function searchBackend() {
-      try {
-        const res = await fetch(`${BACKEND_URL}/contacts/search?q=${encodeURIComponent(search)}&limit=200`);
-        const data = await res.json();
-        setDocs(data.contacts || []);
-        if (data.total) setTotalCount(data.total);
-      } catch(e) {
-        console.error("Backend search error:", e);
-      }
-      setSearching(false);
-    }
-
-    searchBackend();
-  }, [search]);
+  return { groupMap, loading };
+}
 
   function nextPage() {
     if (lastDocs[page]) setPage(p => p + 1);
@@ -161,8 +123,33 @@ function usePaginatedContacts() {
   return { docs, loading: loading || searching, searching, totalCount, totalPages, page, nextPage, prevPage, add, update, remove, doSearch, search, error };
 }
 
-// ─── BACKEND URL ─────────────────────────────────────────────────────────────
 const BACKEND_URL = "https://crm-backend-production-77b8.up.railway.app";
+
+// ─── BACKEND-POWERED HOOKS ────────────────────────────────────────────────────
+
+function useCompanies() {
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/companies`)
+      .then(r => r.json())
+      .then(data => { setCompanies(data.companies || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+  return { companies, loading };
+}
+
+function useImportedGroups() {
+  const [groupMap, setGroupMap] = useState({});
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/groups`)
+      .then(r => r.json())
+      .then(data => { setGroupMap(data.groups || {}); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+  return { groupMap, loading };
+}
 
 // ─── GLOBAL CONTACTS CONTEXT ──────────────────────────────────────────────────
 // Contacts are NEVER loaded into the browser in bulk.
@@ -181,10 +168,7 @@ function ContactsDataProvider({ children }) {
   const [loadError, setLoadError] = useState(null);
   const searchTimeout = useRef(null);
 
-  // Load first page on startup
-  useEffect(() => {
-    loadPage(null);
-  }, []);
+  useEffect(() => { loadPage(null); }, []);
 
   async function loadPage(pageToken) {
     setLoading(true);
@@ -195,9 +179,8 @@ function ContactsDataProvider({ children }) {
       const data = await res.json();
       setContacts(data.contacts || []);
       setNextPageToken(data.nextPageToken || null);
-      if (!totalCount) setTotalCount(data.contacts?.length || 0);
     } catch(e) {
-      setLoadError("Could not connect to backend. Check your internet connection.");
+      setLoadError("Could not connect to backend.");
     }
     setLoading(false);
   }
@@ -218,10 +201,7 @@ function ContactsDataProvider({ children }) {
   function doSearch(q) {
     clearTimeout(searchTimeout.current);
     setSearch(q);
-    if (!q || q.length < 2) {
-      loadPage(null);
-      return;
-    }
+    if (!q || q.length < 2) { loadPage(null); return; }
     searchTimeout.current = setTimeout(async () => {
       setSearching(true);
       setContacts([]);
@@ -230,17 +210,12 @@ function ContactsDataProvider({ children }) {
         const data = await res.json();
         setContacts(data.contacts || []);
         setTotalCount(data.total || 0);
-      } catch(e) {
-        setLoadError("Search failed. Please try again.");
-      }
+      } catch(e) { setLoadError("Search failed."); }
       setSearching(false);
     }, 400);
   }
 
-  async function addContact(data) {
-    const ref = await addDoc(collection(db, "contacts"), data);
-    return ref;
-  }
+  async function addContact(data) { return await addDoc(collection(db, "contacts"), data); }
   async function updateContact(id, data) {
     await updateDoc(doc(db, "contacts", id), data);
     setContacts(prev => prev.map(c => c.id === id ? { ...c, ...data } : c));
