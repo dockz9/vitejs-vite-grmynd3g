@@ -109,59 +109,26 @@ function usePaginatedContacts() {
     });
   }, [page, search]);
 
-  // Full search across ALL contacts — loads in batches
+  // Search via backend — instant, searches all 34,000 contacts
+  const BACKEND_URL = "https://crm-backend-production-77b8.up.railway.app";
   useEffect(() => {
     if (!search) return;
     setSearching(true);
     setDocs([]);
 
-    async function searchAll() {
-      const sq = search.toLowerCase();
-      const results = [];
-      let lastDoc = null;
-      const BATCH = 1000;
-
-      while (true) {
-        try {
-          const q = lastDoc
-            ? query(collection(db, "contacts"), startAfter(lastDoc), limit(BATCH))
-            : query(collection(db, "contacts"), limit(BATCH));
-          const snap = await getDocs(q);
-          if (snap.empty) break;
-
-          snap.docs.forEach(d => {
-            const c = { id: d.id, ...d.data() };
-            if (
-              c.name?.toLowerCase().includes(sq) ||
-              c.firstName?.toLowerCase().includes(sq) ||
-              c.lastName?.toLowerCase().includes(sq) ||
-              c.company?.toLowerCase().includes(sq) ||
-              c.email?.toLowerCase().includes(sq) ||
-              c.jobTitle?.toLowerCase().includes(sq) ||
-              c.metroArea?.toLowerCase().includes(sq) ||
-              c.industry?.toLowerCase().includes(sq)
-            ) {
-              results.push(c);
-            }
-          });
-
-          // Show results as they come in
-          setDocs([...results].sort((a, b) => {
-            const aLast = (a.lastName || a.name || "").toLowerCase();
-            const bLast = (b.lastName || b.name || "").toLowerCase();
-            if (aLast !== bLast) return aLast.localeCompare(bLast);
-            return (a.firstName || "").toLowerCase().localeCompare((b.firstName || "").toLowerCase());
-          }));
-
-          lastDoc = snap.docs[snap.docs.length - 1];
-          if (snap.docs.length < BATCH) break;
-          await new Promise(r => setTimeout(r, 50));
-        } catch (e) { break; }
+    async function searchBackend() {
+      try {
+        const res = await fetch(`${BACKEND_URL}/contacts/search?q=${encodeURIComponent(search)}&limit=200`);
+        const data = await res.json();
+        setDocs(data.contacts || []);
+        if (data.total) setTotalCount(data.total);
+      } catch(e) {
+        console.error("Backend search error:", e);
       }
       setSearching(false);
     }
 
-    searchAll();
+    searchBackend();
   }, [search]);
 
   function nextPage() {
