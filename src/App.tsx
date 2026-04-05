@@ -1293,7 +1293,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
           </select>
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button onClick={prevPage} disabled={page === 0} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: page === 0 ? "#333" : "#9999cc", cursor: page === 0 ? "not-allowed" : "pointer", fontSize: 12 }}>← Prev</button>
+          <button onClick={prevPage} disabled={!hasPrev} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: !hasPrev ? "#333" : "#9999cc", cursor: !hasPrev ? "not-allowed" : "pointer", fontSize: 12 }}>← Prev</button>
           <button onClick={nextPage} disabled={!hasNext} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: !hasNext ? "#333" : "#9999cc", cursor: !hasNext ? "not-allowed" : "pointer", fontSize: 12 }}>Next →</button>
         </div>
       </div>
