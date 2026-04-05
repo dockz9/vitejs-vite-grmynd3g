@@ -1203,7 +1203,7 @@ function ContactDetailModal({ contact, onClose, onEdit, emails, meetings }) {
 
 // ─── CONTACTS TAB ─────────────────────────────────────────────────────────────
 function ContactsTab({ contactsCol, emails, meetings, groups }) {
-  const { docs: contacts, loading: contactsLoading, totalCount, totalPages, page, nextPage, prevPage, doSearch, search, error: contactsError } = contactsCol;
+  const { docs: contacts, loading: contactsLoading, totalCount, nextPage, prevPage, hasNext, hasPrev, doSearch, search, error: contactsError } = contactsCol;
   const [searchInput, setSearchInput] = useState("");
   const [filter, setFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -1284,7 +1284,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
       {/* Page info + filter bar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 12, color: "#555" }}>
-          {search ? (contactsCol.searching ? `⟳ Searching all ${totalCount.toLocaleString()} contacts…` : `${filtered.length} results for "${search}"`) : `${totalCount.toLocaleString()} total · page ${page + 1} of ${totalPages || 1}`}
+          {search ? (contactsCol.searching ? `⟳ Searching all ${totalCount.toLocaleString()} contacts…` : `${filtered.length} results for "${search}"`) : `${totalCount.toLocaleString()} contacts loaded`}
         </span>
         {importGroups.length > 0 && (
           <select value={importGroupFilter} onChange={e => setImportGroupFilter(e.target.value)} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "4px 10px", color: "#e0e0ff", fontSize: 12, fontFamily: "inherit", outline: "none" }}>
@@ -1294,7 +1294,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button onClick={prevPage} disabled={page === 0} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: page === 0 ? "#333" : "#9999cc", cursor: page === 0 ? "not-allowed" : "pointer", fontSize: 12 }}>← Prev</button>
-          <button onClick={nextPage} disabled={page >= totalPages - 1 || contacts.length < PAGE_SIZE} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: (page >= totalPages - 1 || contacts.length < PAGE_SIZE) ? "#333" : "#9999cc", cursor: (page >= totalPages - 1 || contacts.length < PAGE_SIZE) ? "not-allowed" : "pointer", fontSize: 12 }}>Next →</button>
+          <button onClick={nextPage} disabled={!hasNext} style={{ padding: "4px 14px", borderRadius: 8, border: "1px solid #2a2a3a", background: "transparent", color: !hasNext ? "#333" : "#9999cc", cursor: !hasNext ? "not-allowed" : "pointer", fontSize: 12 }}>Next →</button>
         </div>
       </div>
 
