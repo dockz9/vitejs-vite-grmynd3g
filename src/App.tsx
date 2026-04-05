@@ -54,74 +54,6 @@ function useCollection(name) {
   return { docs, loading, add, update, remove };
 }
 
-// Paginated hook for large collections like contacts
-const PAGE_SIZE = 50;
-
-const BACKEND_URL = "https://crm-backend-production-77b8.up.railway.app";
-
-function useCompanies() {
-  const [companies, setCompanies] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`${BACKEND_URL}/companies`)
-      .then(r => r.json())
-      .then(data => {
-        setCompanies(data.companies || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  return { companies, loading };
-}
-
-function useImportedGroups() {
-  const [groupMap, setGroupMap] = useState({});
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`${BACKEND_URL}/groups`)
-      .then(r => r.json())
-      .then(data => {
-        setGroupMap(data.groups || {});
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  return { groupMap, loading };
-}
-
-  function nextPage() {
-    if (lastDocs[page]) setPage(p => p + 1);
-  }
-  function prevPage() { setPage(p => Math.max(0, p - 1)); }
-
-  function doSearch(val) {
-    clearTimeout(searchTimeout.current);
-    searchTimeout.current = setTimeout(() => {
-      setSearchState(val);
-      setPage(0);
-    }, 400);
-  }
-
-  async function add(data) {
-    const ref = await addDoc(collection(db, "contacts"), data);
-    setTotalCount(c => c + 1);
-    return ref;
-  }
-  async function update(id, data) { await updateDoc(doc(db, "contacts", id), data); }
-  async function remove(id) {
-    await deleteDoc(doc(db, "contacts", id));
-    setTotalCount(c => c - 1);
-    setDocs(d => d.filter(x => x.id !== id));
-  }
-
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-
-  return { docs, loading: loading || searching, searching, totalCount, totalPages, page, nextPage, prevPage, add, update, remove, doSearch, search, error };
-}
 
 const BACKEND_URL = "https://crm-backend-production-77b8.up.railway.app";
 
@@ -152,8 +84,6 @@ function useImportedGroups() {
 }
 
 // ─── GLOBAL CONTACTS CONTEXT ──────────────────────────────────────────────────
-// Contacts are NEVER loaded into the browser in bulk.
-// The backend handles all queries, search, and AI targeting.
 const ContactsDataContext = React.createContext(null);
 function useContactsData() { return React.useContext(ContactsDataContext); }
 
@@ -187,7 +117,7 @@ function ContactsDataProvider({ children }) {
 
   function nextPage() {
     if (!nextPageToken) return;
-    setPrevTokens(p => [...p, null]);
+    setPrevTokens(p => [...p, nextPageToken]);
     loadPage(nextPageToken);
   }
 
@@ -248,6 +178,7 @@ function ContactsDataProvider({ children }) {
     </ContactsDataContext.Provider>
   );
 }
+
 
 // ─── RELATIONSHIP HEALTH SCORE ────────────────────────────────────────────────
 function calcHealthScore(contact, emails, meetings) {
