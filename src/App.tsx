@@ -92,51 +92,42 @@ function ContactsDataProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
-  const [nextPageToken, setNextPageToken] = useState(null);
-  const [prevTokens, setPrevTokens] = useState([]);
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [search, setSearch] = useState("");
   const [loadError, setLoadError] = useState(null);
   const searchTimeout = useRef(null);
 
-  useEffect(() => { loadPage(null); }, []);
+  useEffect(() => { loadPage(0); }, []);
 
-  async function loadPage(pageToken) {
+  async function loadPage(p) {
     setLoading(true);
     setLoadError(null);
     try {
-      const url = `${BACKEND_URL}/contacts?limit=50${pageToken ? `&pageToken=${pageToken}` : ""}`;
-      const res = await fetch(url);
+      const res = await fetch(`${BACKEND_URL}/contacts?page=${p}&limit=50`);
       const data = await res.json();
       setContacts(data.contacts || []);
-      setNextPageToken(data.nextPageToken || null);
+      setTotalCount(data.total || 0);
+      setTotalPages(data.totalPages || 0);
+      setPage(p);
     } catch(e) {
       setLoadError("Could not connect to backend.");
     }
     setLoading(false);
   }
 
-  function nextPage() {
-    if (!nextPageToken) return;
-    setPrevTokens(p => [...p, nextPageToken]);
-    loadPage(nextPageToken);
-  }
-
-  function prevPage() {
-    const tokens = [...prevTokens];
-    const token = tokens.pop() || null;
-    setPrevTokens(tokens);
-    loadPage(token);
-  }
+  function nextPage() { loadPage(page + 1); }
+  function prevPage() { if (page > 0) loadPage(page - 1); }
 
   function doSearch(q) {
     clearTimeout(searchTimeout.current);
     setSearch(q);
-    if (!q || q.length < 2) { loadPage(null); return; }
+    if (!q || q.length < 2) { loadPage(0); return; }
     searchTimeout.current = setTimeout(async () => {
       setSearching(true);
       setContacts([]);
       try {
-        const res = await fetch(`${BACKEND_URL}/contacts/search?q=${encodeURIComponent(q)}&limit=100`);
+        const res = await fetch(`${BACKEND_URL}/contacts/search?q=${encodeURIComponent(q)}&limit=200`);
         const data = await res.json();
         setContacts(data.contacts || []);
         setTotalCount(data.total || 0);
@@ -160,10 +151,12 @@ function ContactsDataProvider({ children }) {
     loading: loading || searching,
     searching,
     totalCount,
+    totalPages,
+    page,
     nextPage,
     prevPage,
-    hasNext: !!nextPageToken,
-    hasPrev: prevTokens.length > 0,
+    hasNext: page < totalPages - 1,
+    hasPrev: page > 0,
     doSearch,
     search,
     error: loadError,
@@ -1203,7 +1196,7 @@ function ContactDetailModal({ contact, onClose, onEdit, emails, meetings }) {
 
 // ─── CONTACTS TAB ─────────────────────────────────────────────────────────────
 function ContactsTab({ contactsCol, emails, meetings, groups }) {
-  const { docs: contacts, loading: contactsLoading, totalCount, nextPage, prevPage, hasNext, hasPrev, doSearch, search, error: contactsError } = contactsCol;
+  const { docs: contacts, loading: contactsLoading, totalCount, totalPages, page: currentPage, nextPage, prevPage, hasNext, hasPrev, doSearch, search, error: contactsError } = contactsCol;
   const [searchInput, setSearchInput] = useState("");
   const [filter, setFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -1284,7 +1277,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
       {/* Page info + filter bar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 12, color: "#555" }}>
-          {search ? (contactsCol.searching ? `⟳ Searching all ${totalCount.toLocaleString()} contacts…` : `${filtered.length} results for "${search}"`) : `${totalCount.toLocaleString()} contacts loaded`}
+          {search ? (contactsCol.searching ? `⟳ Searching all ${totalCount.toLocaleString()} contacts…` : `${filtered.length} results for "${search}"`) : `${totalCount.toLocaleString()} contacts · page ${contactsCol.page + 1} of ${totalPages || 1}`}
         </span>
         {importGroups.length > 0 && (
           <select value={importGroupFilter} onChange={e => setImportGroupFilter(e.target.value)} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "4px 10px", color: "#e0e0ff", fontSize: 12, fontFamily: "inherit", outline: "none" }}>
