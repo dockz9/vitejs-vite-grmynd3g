@@ -1434,14 +1434,8 @@ function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
   const filteredManual = groups.filter(g => g.name.toLowerCase().includes(search.toLowerCase()));
   const filteredImported = importedGroups.filter(g => g.toLowerCase().includes(search.toLowerCase()));
 
-  const ctx2 = useContactsData();
   if (groupsLoading) return (
-    <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>
-      <div style={{ marginBottom: 12 }}>⟳ Loading groups… {ctx2?.progress || 0}%</div>
-      <div style={{ height: 4, background: "#1e1e2e", borderRadius: 10, width: 200, margin: "0 auto", overflow: "hidden" }}>
-        <div style={{ width: `${ctx2?.progress || 0}%`, height: "100%", background: "#8b5cf6", borderRadius: 10, transition: "width 0.3s" }} />
-      </div>
-    </div>
+    <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>⟳ Loading groups…</div>
   );
 
   function selectGroup(id, type) {
@@ -1486,7 +1480,7 @@ function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
           <div style={{ fontSize: 11, fontWeight: 700, color: "#8b5cf6", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Imported Groups ({filteredImported.length})</div>
           <div style={{ display: "grid", gap: 6 }}>
             {filteredImported.map(g => {
-              const count = contacts.filter(c => c.importGroups === g).length;
+              const count = (groupMap[g] || []).length;
               const isSelected = selected === g && selectedType === "imported";
               return (
                 <div key={g} onClick={() => selectGroup(g, "imported")} style={{ background: "#0d0d14", border: `1px solid ${isSelected ? "#8b5cf6" : "#1e1e2e"}`, borderRadius: 10, padding: "10px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "all 0.15s" }}>
