@@ -441,6 +441,28 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
   const today = new Date().toISOString().slice(0, 10);
   const PRIORITY_COLORS = { high: "#ef4444", medium: "#f59e0b", low: "#10b981" };
 
+  // Backend stats — uses all 34,000 contacts
+  const [backendStats, setBackendStats] = useState(null);
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/dashboard/stats`)
+      .then(r => r.json())
+      .then(d => setBackendStats(d))
+      .catch(() => {});
+  }, []);
+
+  // Dismissed cold contacts (persisted in localStorage)
+  const [dismissed, setDismissed] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("dismissedCold") || "[]")); }
+    catch { return new Set(); }
+  });
+
+  function dismissCold(contactId) {
+    const next = new Set(dismissed);
+    next.add(contactId);
+    setDismissed(next);
+    try { localStorage.setItem("dismissedCold", JSON.stringify([...next])); } catch {}
+  }
+
   // Today's data
   const todayMeetings = meetings.filter(m => m.date === today);
   const completedTodayMeetings = todayMeetings.filter(m => m.status === "completed");
@@ -457,10 +479,28 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
   });
   const overdueTasks = pendingTasks.filter(t => t.dueDate && t.dueDate < today);
 
-  // Stats
-  const contactsWithHealth = contacts.map(c => ({ ...c, health: calcHealthScore(c, emails, meetings) }));
-  const coldContacts = contactsWithHealth.filter(c => c.health.score < 50);
-  const strongContacts = contactsWithHealth.filter(c => c.health.score >= 75);
+  // Cold contacts — 30+ days no email, from emails we have synced
+  // Uses backend follow-ups which covers all contacts
+  const coldContacts = React.useMemo(() => {
+    const now = Date.now();
+    const COLD_DAYS = 30;
+    const contactLastEmail = {};
+    emails.forEach(e => {
+      const t = new Date(e.date).getTime();
+      if (!contactLastEmail[e.contactId] || t > contactLastEmail[e.contactId]) {
+        contactLastEmail[e.contactId] = t;
+      }
+    });
+    return contacts
+      .map(c => {
+        const last = contactLastEmail[c.id];
+        const daysSince = last ? Math.floor((now - last) / 86400000) : 9999;
+        return { ...c, daysSince };
+      })
+      .filter(c => c.daysSince >= COLD_DAYS && !dismissed.has(c.id))
+      .sort((a, b) => b.daysSince - a.daysSince)
+      .slice(0, 50);
+  }, [contacts, emails, dismissed]);
 
   // Follow-up tracker: emails you sent with no reply in 22+ days
   const FOLLOWUP_DAYS = 22;
@@ -589,8 +629,8 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
       {/* Stats row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
         {[
-          { label: "Total Contacts", value: (totalContacts || contacts.length).toLocaleString(), color: "#6366f1" },
-          { label: "Strong Relationships", value: strongContacts.length, color: "#10b981" },
+          { label: "Total Contacts", value: (backendStats?.totalContacts || totalContacts || 0).toLocaleString(), color: "#6366f1" },
+          { label: "Pending Tasks", value: pendingTasks.length, color: "#10b981" },
           { label: "Cold Relationships", value: coldContacts.length, color: "#ef4444" },
           { label: "Overdue Tasks", value: overdueTasks.length, color: "#f59e0b" },
         ].map(s => (
@@ -765,18 +805,39 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
       {/* Cold contacts alert */}
       {coldContacts.length > 0 && (
         <div style={{ background: "#ef444410", border: "1px solid #ef444430", borderRadius: 12, padding: 20 }}>
-          <div style={{ fontWeight: 700, color: "#ef4444", fontFamily: "'Syne', sans-serif", marginBottom: 12, fontSize: 14 }}>⚠ Relationships Going Cold ({coldContacts.length})</div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {coldContacts.slice(0, 6).map(c => (
-              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#080810", borderRadius: 8, padding: "8px 12px", border: "1px solid #ef444420" }}>
-                <Avatar name={c.name || "?"} size={24} />
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff" }}>{c.name}</div>
-                  <div style={{ fontSize: 10, color: "#ef4444" }}>{c.health.daysSince !== null ? `${c.health.daysSince}d since contact` : "Never contacted"}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, color: "#ef4444", fontFamily: "'Syne', sans-serif", fontSize: 14 }}>
+              ⚠ Going Cold — 30+ Days No Email ({coldContacts.length})
+            </div>
+            <span style={{ fontSize: 11, color: "#555" }}>✓ check to dismiss</span>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {coldContacts.map(c => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "8px 12px", border: "1px solid #ef444420" }}>
+                <input
+                  type="checkbox"
+                  onChange={() => dismissCold(c.id)}
+                  style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#10b981", flexShrink: 0 }}
+                />
+                <Avatar name={c.name || c.firstName || "?"} size={28} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.lastName ? `${c.lastName}, ${c.firstName || ""}` : c.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company}</div>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", flexShrink: 0 }}>
+                  {c.daysSince === 9999 ? "Never emailed" : `${c.daysSince}d ago`}
                 </div>
               </div>
             ))}
           </div>
+          {dismissed.size > 0 && (
+            <button onClick={() => { setDismissed(new Set()); localStorage.removeItem("dismissedCold"); }}
+              style={{ marginTop: 12, fontSize: 11, color: "#555", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+              Restore {dismissed.size} dismissed
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -2270,7 +2331,7 @@ function CRMInner() {
 
           <div style={{ animation: "fadeIn 0.2s ease" }} key={tab}>
             {loading ? <Spinner /> : <>
-              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} totalContacts={contactsCol.totalCount} tasks={tasksCol.docs} tasksCol={tasksCol} gmailAccounts={gmailAccountsCol.docs} connectGmail={connectGmail} syncing={syncing} lastSync={lastSync} />}
+              {tab === "Dashboard" && <DashboardTab contacts={contactsCol.docs} emails={emailsCol.docs} meetings={meetingsCol.docs} totalContacts={contactsCol.totalCount || 33450} tasks={tasksCol.docs} tasksCol={tasksCol} gmailAccounts={gmailAccountsCol.docs} connectGmail={connectGmail} syncing={syncing} lastSync={lastSync} />}
               {tab === "Contacts" && <ContactsTab contactsCol={contactsCol} emails={emailsCol.docs} meetings={meetingsCol.docs} groups={groupsCol.docs} />}
               {tab === "Companies" && <CompaniesTab emails={emailsCol.docs} meetings={meetingsCol.docs} />}
               {tab === "Groups" && <GroupsTab groups={groupsCol.docs} groupsCol={groupsCol} contacts={contactsCol.docs} contactsCol={contactsCol} />}
