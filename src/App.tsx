@@ -616,8 +616,10 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
             : "Gmail not connected — follow-up tracking requires Gmail"
           }
         </div>
-        {!gmailAccounts.length && connectGmail && (
-          <Btn size="sm" onClick={connectGmail}>Connect Gmail</Btn>
+        {connectGmail && (
+          <Btn size="sm" variant={gmailAccounts.length ? "ghost" : "primary"} onClick={connectGmail}>
+            {gmailAccounts.length ? "↺ Reconnect" : "Connect Gmail"}
+          </Btn>
         )}
         {gmailAccounts.length > 0 && followUps.length > 0 && (
           <span style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", background: "#f59e0b20", padding: "2px 8px", borderRadius: 20, border: "1px solid #f59e0b40" }}>
