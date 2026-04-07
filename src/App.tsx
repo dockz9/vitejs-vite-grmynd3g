@@ -231,50 +231,38 @@ function useGmailSync(contacts, emailsCol, gmailAccounts) {
     }, 500);
   }
 
+  // Sync via backend — matches against ALL 34,000 contacts not just current page
   async function syncAll() {
-    if (!gmailAccounts.length || !contacts.length) return;
+    if (!gmailAccounts.length) return;
     setSyncing(true);
-    const contactEmails = contacts.map(c => c.email?.toLowerCase()).filter(Boolean);
-    const query = contactEmails.map(e => `from:${e} OR to:${e}`).join(" OR ");
-    const syncedIds = new Set(emailsCol.docs.filter(e => e.gmailId).map(e => e.gmailId));
     for (const account of gmailAccounts) {
       try {
-        const [inboxRes, sentRes] = await Promise.all([
-          fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`, { headers: { Authorization: `Bearer ${account.access_token}` } }),
-          fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(`in:sent ${query}`)}&maxResults=50`, { headers: { Authorization: `Bearer ${account.access_token}` } }),
-        ]);
-        if (inboxRes.status === 401) continue;
-        const inbox = await inboxRes.json();
-        const sent = await sentRes.json();
-        for (const msg of [...(inbox.messages || []), ...(sent.messages || [])]) {
-          if (syncedIds.has(msg.id)) continue;
-          const detailRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`, { headers: { Authorization: `Bearer ${account.access_token}` } });
-          const detail = await detailRes.json();
-          const headers = detail.payload?.headers || [];
-          const from = headers.find(h => h.name === "From")?.value || "";
-          const to = headers.find(h => h.name === "To")?.value || "";
-          const subject = headers.find(h => h.name === "Subject")?.value || "(no subject)";
-          const date = headers.find(h => h.name === "Date")?.value || "";
-          const fromEmail = from.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)?.[0]?.toLowerCase();
-          const toEmail = to.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)?.[0]?.toLowerCase();
-          const contact = contacts.find(c => c.email?.toLowerCase() === fromEmail || c.email?.toLowerCase() === toEmail);
-          if (!contact) continue;
-          const direction = contactEmails.includes(fromEmail) ? "received" : "sent";
-          await emailsCol.add({ gmailId: msg.id, contactId: contact.id, subject, body: "", date: date ? new Date(date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10), direction, status: "read", autoSynced: true, gmailAccount: account.email });
-          syncedIds.add(msg.id);
+        const res = await fetch(`${BACKEND_URL}/gmail/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: account.access_token, accountEmail: account.email })
+        });
+        if (res.status === 401) {
+          // Token expired — mark account as needing reconnect
+          console.warn("Gmail token expired for", account.email);
+          continue;
         }
-      } catch (e) {}
+        const data = await res.json();
+        console.log(`Gmail sync: ${data.synced} emails synced for ${account.email}`);
+      } catch (e) {
+        console.error("Gmail sync error:", e);
+      }
     }
     setLastSync(new Date());
     setSyncing(false);
   }
 
   useEffect(() => {
-    if (!gmailAccounts.length || !contacts.length) return;
+    if (!gmailAccounts.length) return;
     syncAll();
     const interval = setInterval(syncAll, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [gmailAccounts.length, contacts.length]);
+  }, [gmailAccounts.length]);
 
   return { syncing, lastSync, connectGmail, syncAll };
 }
