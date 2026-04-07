@@ -317,9 +317,9 @@ function useGoogleCalendar(contacts, meetingsCol) {
     setSyncing(true);
     try {
       const now = new Date();
-      const twoWeeksAgo = new Date(now - 14 * 86400000).toISOString();
-      const twoWeeksAhead = new Date(now.getTime() + 14 * 86400000).toISOString();
-      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${twoWeeksAgo}&timeMax=${twoWeeksAhead}&maxResults=50&singleEvents=true&orderBy=startTime`, { headers: { Authorization: `Bearer ${token}` } });
+      const threeMonthsAgo = new Date(now - 90 * 86400000).toISOString();
+      const threeMonthsAhead = new Date(now.getTime() + 90 * 86400000).toISOString();
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${threeMonthsAgo}&timeMax=${threeMonthsAhead}&maxResults=250&singleEvents=true&orderBy=startTime`, { headers: { Authorization: `Bearer ${token}` } });
       if (res.status === 401) { setCalConnected(false); setSyncing(false); return; }
       const data = await res.json();
       const syncedIds = new Set(meetingsCol.docs.filter(m => m.calEventId).map(m => m.calEventId));
