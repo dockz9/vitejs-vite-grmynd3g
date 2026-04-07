@@ -479,19 +479,21 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
   });
   const overdueTasks = pendingTasks.filter(t => t.dueDate && t.dueDate < today);
 
-  // Cold contacts — 30+ days no email, from emails we have synced
-  // Uses backend follow-ups which covers all contacts
+  // Cold contacts — 30+ days no email, ONLY contacts with prior email history
   const coldContacts = React.useMemo(() => {
     const now = Date.now();
     const COLD_DAYS = 30;
     const contactLastEmail = {};
+    const contactHasEmail = new Set();
     emails.forEach(e => {
+      contactHasEmail.add(e.contactId);
       const t = new Date(e.date).getTime();
       if (!contactLastEmail[e.contactId] || t > contactLastEmail[e.contactId]) {
         contactLastEmail[e.contactId] = t;
       }
     });
     return contacts
+      .filter(c => contactHasEmail.has(c.id)) // must have at least one email
       .map(c => {
         const last = contactLastEmail[c.id];
         const daysSince = last ? Math.floor((now - last) / 86400000) : 9999;
@@ -1508,83 +1510,104 @@ function GroupsTab({ groups, groupsCol, contacts, contactsCol }) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: selected ? "320px 1fr" : "1fr", gap: 20, height: "calc(100vh - 220px)" }}>
+
+      {/* Left panel — group list */}
       <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "center", flexShrink: 0 }}>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search groups…" style={{ flex: 1, background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "8px 14px", color: "#e0e0ff", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
           <Btn size="sm" onClick={openNew}>+ New</Btn>
         </div>
-
-        {/* Manual groups */}
-        {filteredManual.length > 0 && <>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Custom Groups</div>
-          <div style={{ display: "grid", gap: 8, marginBottom: 20 }}>
-            {filteredManual.map(g => {
-              const count = contacts.filter(c => (c.groups || []).includes(g.id)).length;
-              const isSelected = selected === g.id && selectedType === "manual";
-              return (
-                <div key={g.id} onClick={() => selectGroup(g.id, "manual")} style={{ background: "#0d0d14", border: `1px solid ${isSelected ? g.color || "#6366f1" : "#1e1e2e"}`, borderRadius: 10, padding: "12px 16px", cursor: "pointer", transition: "all 0.15s" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: g.color || "#6366f1", flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}><div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13 }}>{g.name}</div>{g.description && <div style={{ fontSize: 11, color: "#666" }}>{g.description}</div>}</div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: g.color || "#6366f1", fontFamily: "'Syne', sans-serif" }}>{count}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                    <Btn size="sm" variant="ghost" onClick={e => { e.stopPropagation(); openEdit(g); }}>Edit</Btn>
-                    <Btn size="sm" variant="danger" onClick={e => { e.stopPropagation(); if(window.confirm(`Delete group "${g.name}"?`)) groupsCol.remove(g.id); }}>×</Btn>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>}
-
-        {/* Imported groups */}
-        {filteredImported.length > 0 && <>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#8b5cf6", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Imported Groups ({filteredImported.length})</div>
+        <div style={{ fontSize: 12, color: "#555", marginBottom: 10, flexShrink: 0 }}>
+          {filteredManual.length + filteredImported.length} groups
+        </div>
+        <div style={{ overflowY: "auto", flex: 1, paddingRight: 4 }}>
           <div style={{ display: "grid", gap: 6 }}>
-            {filteredImported.map(g => {
-              const count = (groupMap[g] || []).length;
-              const isSelected = selected === g && selectedType === "imported";
-              return (
-                <div key={g} onClick={() => selectGroup(g, "imported")} style={{ background: "#0d0d14", border: `1px solid ${isSelected ? "#8b5cf6" : "#1e1e2e"}`, borderRadius: 10, padding: "10px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "all 0.15s" }}>
-                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#8b5cf6", flexShrink: 0 }} />
-                  <div style={{ flex: 1, fontWeight: 600, color: "#f0f0ff", fontSize: 13 }}>{g}</div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: "#8b5cf6", fontFamily: "'Syne', sans-serif" }}>{count}</div>
-                </div>
-              );
-            })}
-          </div>
-        </>}
 
-        {filteredManual.length === 0 && filteredImported.length === 0 && (
-          <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No groups found.</div>
-        )}
+            {/* Custom groups */}
+            {filteredManual.length > 0 && <>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4, marginTop: 4 }}>Custom Groups</div>
+              {filteredManual.map(g => {
+                const count = contacts.filter(c => (c.groups || []).includes(g.id)).length;
+                const isSelected = selected === g.id && selectedType === "manual";
+                return (
+                  <div key={g.id} onClick={() => selectGroup(g.id, "manual")}
+                    style={{ background: "#0d0d14", border: `1px solid ${isSelected ? g.color || "#6366f1" : "#1e1e2e"}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", transition: "all 0.15s" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: "50%", background: g.color || "#6366f1", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</div>
+                        {g.description && <div style={{ fontSize: 11, color: "#666" }}>{g.description}</div>}
+                      </div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: g.color || "#6366f1", fontFamily: "'Syne', sans-serif", flexShrink: 0 }}>{count}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      <Btn size="sm" variant="ghost" onClick={e => { e.stopPropagation(); openEdit(g); }}>Edit</Btn>
+                      <Btn size="sm" variant="danger" onClick={e => { e.stopPropagation(); if(window.confirm(`Delete "${g.name}"?`)) groupsCol.remove(g.id); }}>×</Btn>
+                    </div>
+                  </div>
+                );
+              })}
+            </>}
+
+            {/* Imported groups */}
+            {filteredImported.length > 0 && <>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#8b5cf6", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4, marginTop: 12 }}>Imported Groups ({filteredImported.length})</div>
+              {filteredImported.map(g => {
+                const count = (groupMap[g] || []).length;
+                const isSelected = selected === g && selectedType === "imported";
+                return (
+                  <div key={g} onClick={() => selectGroup(g, "imported")}
+                    style={{ background: "#0d0d14", border: `1px solid ${isSelected ? "#8b5cf6" : "#1e1e2e"}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "all 0.15s" }}>
+                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#8b5cf6", flexShrink: 0 }} />
+                    <div style={{ flex: 1, fontWeight: 600, color: "#f0f0ff", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#8b5cf6", fontFamily: "'Syne', sans-serif", flexShrink: 0 }}>{count}</div>
+                  </div>
+                );
+              })}
+            </>}
+
+            {filteredManual.length === 0 && filteredImported.length === 0 && (
+              <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No groups found.</div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Right panel — group members */}
       {selected && selectedName && (
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-            <div style={{ width: 12, height: 12, borderRadius: "50%", background: selectedType === "imported" ? "#8b5cf6" : (groups.find(g=>g.id===selected)?.color || "#6366f1") }} />
-            <h3 style={{ color: "#f0f0ff", fontSize: 16, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>{selectedName}</h3>
-            <span style={{ color: "#555", fontSize: 13 }}>· {selectedContacts.length} contacts</span>
+        <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexShrink: 0 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 10, background: selectedType === "imported" ? "#8b5cf620" : "#6366f120", border: `1px solid ${selectedType === "imported" ? "#8b5cf630" : "#6366f130"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+              {selectedType === "imported" ? "🏷" : "👥"}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 800, color: "#f0f0ff", fontSize: 16, fontFamily: "'Syne', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedName}</div>
+              <div style={{ fontSize: 12, color: "#666" }}>{selectedContacts.length} contacts {selectedType === "imported" ? "· imported group" : "· custom group"}</div>
+            </div>
             {selectedType === "imported" && <Tag color="#8b5cf6">imported</Tag>}
           </div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {selectedContacts.sort((a,b) => (a.lastName||a.name||"").localeCompare(b.lastName||b.name||"")).map(c => (
-              <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-                <Avatar name={c.name || "?"} size={34} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13 }}>{c.lastName ? `${c.lastName}, ${c.firstName||""}` : c.name}</div>
-                  <div style={{ fontSize: 11, color: "#888" }}>{c.jobTitle ? `${c.jobTitle} · ` : ""}{c.company}{c.email ? ` · ${c.email}` : ""}</div>
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            <div style={{ display: "grid", gap: 8 }}>
+              {selectedContacts.sort((a,b) => (a.lastName||a.name||"").localeCompare(b.lastName||b.name||"")).map(c => (
+                <div key={c.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                  <Avatar name={c.name || c.firstName || "?"} size={34} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {c.lastName ? `${c.lastName}, ${c.firstName || ""}` : c.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {[c.jobTitle, c.company].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  {c.email && <a href={`mailto:${c.email}`} style={{ fontSize: 11, color: "#6366f1", textDecoration: "none", flexShrink: 0 }}>✉</a>}
+                  <StatusBadge status={c.status} />
+                  {selectedType === "manual" && (
+                    <Btn size="sm" variant="danger" onClick={() => contactsCol.update(c.id, { groups: (c.groups||[]).filter(g => g !== selected) })}>Remove</Btn>
+                  )}
                 </div>
-                <StatusBadge status={c.status} />
-                {selectedType === "manual" && (
-                  <Btn size="sm" variant="danger" onClick={() => contactsCol.update(c.id, { groups: (c.groups||[]).filter(g => g !== selected) })}>Remove</Btn>
-                )}
-              </div>
-            ))}
-            {selectedContacts.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No contacts in this group.</div>}
+              ))}
+              {selectedContacts.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "40px 0", fontStyle: "italic" }}>No contacts in this group.</div>}
+            </div>
           </div>
         </div>
       )}
@@ -2325,7 +2348,7 @@ function CRMInner() {
 
           <div style={{ display: "flex", gap: 3, marginBottom: 24, background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 10, padding: 4, overflowX: "auto" }}>
             {TABS.map(t => (
-              <button key={t} onClick={() => setTab(t)} style={{ flex: 1, minWidth: "fit-content", padding: "9px 12px", borderRadius: 8, border: "none", background: tab === t ? "#6366f1" : "transparent", color: tab === t ? "#fff" : "#666", fontWeight: 700, cursor: "pointer", fontFamily: "'Syne', sans-serif", fontSize: 12, transition: "all 0.15s", whiteSpace: "nowrap" }}>
+              <button key={t} onClick={() => { if (t === "Contacts" && tab === "Contacts") { contactsCol.doSearch(""); } setTab(t); }} style={{ flex: 1, minWidth: "fit-content", padding: "9px 12px", borderRadius: 8, border: "none", background: tab === t ? "#6366f1" : "transparent", color: tab === t ? "#fff" : "#666", fontWeight: 700, cursor: "pointer", fontFamily: "'Syne', sans-serif", fontSize: 12, transition: "all 0.15s", whiteSpace: "nowrap" }}>
                 {t === "Dashboard" && "⬡ "}{t === "Outreach" ? <>{t}<span style={{ marginLeft: 4, background: tab === t ? "#ffffff30" : "#6366f130", color: tab === t ? "#fff" : "#6366f1", borderRadius: 20, padding: "1px 6px", fontSize: 9 }}>AI</span></> : t}
               </button>
             ))}
