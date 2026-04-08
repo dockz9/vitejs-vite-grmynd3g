@@ -2092,16 +2092,35 @@ function PitchdecksTab({ contacts }) {
     if (!file) return;
     setUploading(true);
     try {
-      // Read file as text (works for PDF text layer, PPTX, DOCX, TXT)
-      const deckText = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => resolve(ev.target.result);
-        // Try to read as text first
-        reader.readAsText(file);
-      });
-      await col.add({ name: file.name, deckText: deckText.slice(0, 20000), uploadedAt: new Date().toISOString(), size: file.size });
+      // Read as base64 for binary files (PDF, PPTX), as text for others
+      const isPDF = file.name.toLowerCase().endsWith(".pdf");
+      const isText = file.name.match(/\.(txt|csv|md)$/i);
+
+      if (isPDF) {
+        const base64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result.split(",")[1]);
+          reader.readAsDataURL(file);
+        });
+        await col.add({ name: file.name, base64, fileType: "pdf", uploadedAt: new Date().toISOString(), size: file.size });
+      } else if (isText) {
+        const deckText = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result);
+          reader.readAsText(file);
+        });
+        await col.add({ name: file.name, deckText: deckText.slice(0, 30000), fileType: "text", uploadedAt: new Date().toISOString(), size: file.size });
+      } else {
+        // PPTX, DOCX, etc — read as base64 and send filename + type as context
+        const base64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result.split(",")[1]);
+          reader.readAsDataURL(file);
+        });
+        await col.add({ name: file.name, base64, fileType: "other", uploadedAt: new Date().toISOString(), size: file.size });
+      }
     } catch (e) {
-      await col.add({ name: file.name, deckText: "", uploadedAt: new Date().toISOString(), size: file.size });
+      await col.add({ name: file.name, deckText: file.name, fileType: "text", uploadedAt: new Date().toISOString(), size: file.size });
     }
     setUploading(false);
   }
@@ -2110,10 +2129,17 @@ function PitchdecksTab({ contacts }) {
     setAnalyzing(deck.id);
     setSelected(deck.id);
     try {
+      const body = {
+        deckName: deck.name,
+        fileType: deck.fileType || "text",
+      };
+      if (deck.base64) body.base64 = deck.base64;
+      else body.deckText = deck.deckText || deck.name;
+
       const res = await fetch(`${BACKEND_URL}/ai/pitchdeck-match`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deckText: deck.deckText || deck.name, deckName: deck.name })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       setResults(r => ({ ...r, [deck.id]: data }));
