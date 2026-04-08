@@ -2083,6 +2083,8 @@ function PitchdecksTab({ contacts }) {
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(null);
   const [results, setResults] = useState({});
+  const [selected, setSelected] = useState(null);
+  const [view, setView] = useState("ranked"); // "ranked" or "grouped"
   const fileRef = useRef();
 
   async function handleUpload(e) {
@@ -2090,65 +2092,193 @@ function PitchdecksTab({ contacts }) {
     if (!file) return;
     setUploading(true);
     try {
-      const storageRef = ref(storage, `pitchdecks/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await col.add({ name: file.name, url, uploadedAt: new Date().toISOString(), size: file.size });
+      // Read file as text (works for PDF text layer, PPTX, DOCX, TXT)
+      const deckText = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target.result);
+        // Try to read as text first
+        reader.readAsText(file);
+      });
+      await col.add({ name: file.name, deckText: deckText.slice(0, 20000), uploadedAt: new Date().toISOString(), size: file.size });
     } catch (e) {
-      await col.add({ name: file.name, url: null, uploadedAt: new Date().toISOString(), size: file.size });
+      await col.add({ name: file.name, deckText: "", uploadedAt: new Date().toISOString(), size: file.size });
     }
     setUploading(false);
   }
 
   async function analyzeMatches(deck) {
     setAnalyzing(deck.id);
+    setSelected(deck.id);
     try {
-      const result = await callClaudeJSON(`I have a pitch deck named "${deck.name}". Based on the filename and contact list, suggest best-fit contacts. Return ONLY JSON with keys: "analysis" (2-3 sentences about what this deck covers), "topMatches" (array of contact names, max 5), "reasoning" (one sentence).\n\nContacts: ${contacts.map(c => `${c.name} (${c.company}, ${c.status}${c.tags?.length ? ", " + c.tags.join(", ") : ""})`).join("; ")}`);
-      setResults(r => ({ ...r, [deck.id]: result }));
+      const res = await fetch(`${BACKEND_URL}/ai/pitchdeck-match`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deckText: deck.deckText || deck.name, deckName: deck.name })
+      });
+      const data = await res.json();
+      setResults(r => ({ ...r, [deck.id]: data }));
     } catch (e) {
-      setResults(r => ({ ...r, [deck.id]: { error: "Analysis failed." } }));
+      setResults(r => ({ ...r, [deck.id]: { error: "Analysis failed. Please try again." } }));
     }
     setAnalyzing(null);
   }
 
+  const selectedResult = selected ? results[selected] : null;
+  const selectedDeck = col.docs.find(d => d.id === selected);
+
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div><h3 style={{ color: "#f0f0ff", fontSize: 16, fontWeight: 700, fontFamily: "'Syne', sans-serif", marginBottom: 4 }}>Pitch Decks</h3><p style={{ color: "#666", fontSize: 12 }}>Upload decks and AI matches them to your best-fit contacts</p></div>
-        <div><input ref={fileRef} type="file" accept=".pdf,.pptx,.ppt" style={{ display: "none" }} onChange={handleUpload} /><Btn onClick={() => fileRef.current.click()} disabled={uploading}>{uploading ? "Uploading…" : "⬆ Upload Deck"}</Btn></div>
-      </div>
-      <div style={{ display: "grid", gap: 16 }}>
-        {col.docs.map(deck => {
-          const result = results[deck.id];
-          const matchedContacts = result?.topMatches ? contacts.filter(c => result.topMatches.some(name => c.name?.toLowerCase().includes(name.toLowerCase()))) : [];
-          return (
-            <div key={deck.id} style={{ background: "#0d0d14", border: "1px solid #1e1e2e", borderRadius: 12, padding: 20 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: result ? 16 : 0 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 10, background: "#6366f120", border: "1px solid #6366f130", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>📊</div>
-                <div style={{ flex: 1 }}><div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{deck.name}</div><div style={{ fontSize: 12, color: "#666" }}>Uploaded {new Date(deck.uploadedAt).toLocaleDateString()}</div></div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Btn size="sm" onClick={() => analyzeMatches(deck)} disabled={analyzing === deck.id}>{analyzing === deck.id ? "✦ Analyzing…" : "✦ Find Best Fits"}</Btn>
-                  <Btn size="sm" variant="danger" onClick={() => col.remove(deck.id)}>×</Btn>
-                </div>
-              </div>
-              {result && !result.error && (
-                <div style={{ background: "#080810", borderRadius: 10, padding: 16 }}>
-                  <div style={{ fontSize: 12, color: "#888", marginBottom: 12, lineHeight: 1.6 }}>{result.analysis}</div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Best Fits</div>
-                  {(matchedContacts.length > 0 ? matchedContacts : []).map(c => (
-                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#0d0d14", borderRadius: 8, border: "1px solid #1e1e2e", marginBottom: 6 }}>
-                      <Avatar name={c.name} size={28} /><div><div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff" }}>{c.name}</div><div style={{ fontSize: 11, color: "#666" }}>{c.company}</div></div>
-                      <StatusBadge status={c.status} />
+    <div style={{ display: "grid", gridTemplateColumns: selected && selectedResult ? "280px 1fr" : "1fr", gap: 20, height: "calc(100vh - 220px)" }}>
+
+      {/* Left — deck list */}
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexShrink: 0 }}>
+          <div>
+            <div style={{ fontWeight: 800, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", fontSize: 15 }}>Pitch Decks</div>
+            <div style={{ fontSize: 11, color: "#666" }}>AI matches to your 34,000 contacts</div>
+          </div>
+          <div>
+            <input ref={fileRef} type="file" style={{ display: "none" }} onChange={handleUpload} />
+            <Btn onClick={() => fileRef.current.click()} disabled={uploading}>{uploading ? "⟳ Reading…" : "⬆ Upload"}</Btn>
+          </div>
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          <div style={{ display: "grid", gap: 10 }}>
+            {col.docs.sort((a,b) => b.uploadedAt?.localeCompare(a.uploadedAt || "")).map(deck => {
+              const isSelected = selected === deck.id;
+              const hasResult = !!results[deck.id];
+              return (
+                <div key={deck.id} onClick={() => setSelected(isSelected ? null : deck.id)}
+                  style={{ background: "#0d0d14", border: `1px solid ${isSelected ? "#6366f1" : "#1e1e2e"}`, borderRadius: 12, padding: 16, cursor: "pointer", transition: "all 0.15s" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: "#6366f120", border: "1px solid #6366f130", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📊</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deck.name}</div>
+                      <div style={{ fontSize: 11, color: "#666" }}>{new Date(deck.uploadedAt).toLocaleDateString()}{hasResult ? " · analyzed" : ""}</div>
                     </div>
-                  ))}
-                  {result.reasoning && <div style={{ fontSize: 12, color: "#555", marginTop: 8, fontStyle: "italic" }}>{result.reasoning}</div>}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <Btn size="sm" onClick={e => { e.stopPropagation(); analyzeMatches(deck); }} disabled={analyzing === deck.id}>
+                      {analyzing === deck.id ? "✦ Analyzing…" : hasResult ? "↺ Re-analyze" : "✦ Find Matches"}
+                    </Btn>
+                    <Btn size="sm" variant="danger" onClick={e => { e.stopPropagation(); col.remove(deck.id); if (selected === deck.id) setSelected(null); }}>×</Btn>
+                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
-        {col.docs.length === 0 && <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}><div style={{ fontSize: 40, marginBottom: 12 }}>📊</div><div>No pitch decks yet.</div></div>}
+              );
+            })}
+            {col.docs.length === 0 && (
+              <div style={{ textAlign: "center", color: "#555", padding: "60px 20px" }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+                <div style={{ fontSize: 13, marginBottom: 8 }}>No pitch decks yet</div>
+                <div style={{ fontSize: 11 }}>Upload a deck and AI will match it to your best investors</div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Right — results */}
+      {selected && selectedResult && !selectedResult.error && (
+        <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+
+          {/* Deal summary */}
+          {selectedResult.dealDetails && (
+            <div style={{ background: "#0d0d14", border: "1px solid #6366f130", borderRadius: 12, padding: 16, marginBottom: 16, flexShrink: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Deal Summary — {selectedDeck?.name}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                {Object.entries(selectedResult.dealDetails).filter(([k,v]) => v && k !== "summary").map(([k,v]) => (
+                  <div key={k} style={{ background: "#080810", borderRadius: 8, padding: "8px 12px" }}>
+                    <div style={{ fontSize: 10, color: "#555", textTransform: "capitalize", marginBottom: 2 }}>{k.replace(/([A-Z])/g, ' $1').trim()}</div>
+                    <div style={{ fontSize: 12, color: "#e0e0ff", fontWeight: 600 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {selectedResult.dealDetails.summary && <div style={{ fontSize: 12, color: "#888", marginTop: 10, lineHeight: 1.6, fontStyle: "italic" }}>{selectedResult.dealDetails.summary}</div>}
+            </div>
+          )}
+
+          {/* View toggle + stats */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexShrink: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff" }}>
+              {selectedResult.matches?.length || 0} matches
+              <span style={{ fontSize: 11, color: "#10b981", marginLeft: 8 }}>{selectedResult.totalCRM} from CRM</span>
+              <span style={{ fontSize: 11, color: "#f59e0b", marginLeft: 6 }}>{selectedResult.totalWeb} from web</span>
+            </div>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              <button onClick={() => setView("ranked")} style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: view === "ranked" ? "#6366f1" : "#1a1a2a", color: view === "ranked" ? "#fff" : "#666", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Ranked</button>
+              <button onClick={() => setView("grouped")} style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: view === "grouped" ? "#6366f1" : "#1a1a2a", color: view === "grouped" ? "#fff" : "#666", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>By Type</button>
+            </div>
+          </div>
+
+          <div style={{ overflowY: "auto", flex: 1 }}>
+
+            {/* Ranked view */}
+            {view === "ranked" && (
+              <div style={{ display: "grid", gap: 8 }}>
+                {(selectedResult.matches || []).map((m, i) => (
+                  <div key={i} style={{ background: "#0d0d14", border: `1px solid ${m.inCRM ? "#1e1e2e" : "#f59e0b30"}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: i < 3 ? "#6366f120" : "#1a1a2a", border: `1px solid ${i < 3 ? "#6366f140" : "#2a2a3a"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: i < 3 ? "#6366f1" : "#555", flexShrink: 0 }}>#{i+1}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                        <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13 }}>{m.name}</div>
+                        <div style={{ fontSize: 11, color: "#888" }}>{m.company}</div>
+                        {!m.inCRM && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 20, background: "#f59e0b20", color: "#f59e0b", border: "1px solid #f59e0b40" }}>web</span>}
+                        <div style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: m.score >= 80 ? "#10b981" : m.score >= 60 ? "#f59e0b" : "#888" }}>{m.score}%</div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#666", lineHeight: 1.5 }}>{m.reason}</div>
+                      {m.group && <div style={{ marginTop: 4 }}><Tag color="#8b5cf6">{m.group}</Tag></div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Grouped view */}
+            {view === "grouped" && (
+              <div style={{ display: "grid", gap: 20 }}>
+                {Object.entries(selectedResult.grouped || {}).sort((a,b) => b[1].length - a[1].length).map(([group, matches]) => (
+                  <div key={group}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8b5cf6", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>{group} ({matches.length})</div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {matches.map((m, i) => (
+                        <div key={i} style={{ background: "#0d0d14", border: `1px solid ${m.inCRM ? "#1e1e2e" : "#f59e0b30"}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, color: "#f0f0ff", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
+                            <div style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.company}</div>
+                          </div>
+                          {!m.inCRM && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 20, background: "#f59e0b20", color: "#f59e0b", border: "1px solid #f59e0b40", flexShrink: 0 }}>web</span>}
+                          <div style={{ fontSize: 11, fontWeight: 700, color: m.score >= 80 ? "#10b981" : m.score >= 60 ? "#f59e0b" : "#888", flexShrink: 0 }}>{m.score}%</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {selected && selectedResult?.error && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#ef4444", fontSize: 13 }}>
+          {selectedResult.error}
+        </div>
+      )}
+
+      {selected && !selectedResult && analyzing !== selected && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: "#555" }}>
+          <div style={{ fontSize: 32 }}>📊</div>
+          <div>Click "Find Matches" to analyze this deck</div>
+        </div>
+      )}
+
+      {analyzing && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
+          <div style={{ width: 40, height: 40, borderRadius: "50%", border: "3px solid #6366f1", borderTopColor: "transparent", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ color: "#888", fontSize: 13 }}>AI is reading the deck and searching 34,000 contacts + the web…</div>
+          <div style={{ fontSize: 11, color: "#555" }}>This takes about 30-60 seconds</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2312,7 +2442,7 @@ function CRMInner() {
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #080810; }
         ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0d0d14; } ::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } } @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
       <div style={{ minHeight: "100vh", background: "#080810", fontFamily: "'DM Mono', monospace", color: "#e0e0ff" }}>
         <div style={{ borderBottom: "1px solid #1a1a2a", padding: "18px 24px", display: "flex", alignItems: "center", gap: 16, background: "#0a0a12" }}>
