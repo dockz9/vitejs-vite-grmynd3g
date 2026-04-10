@@ -2207,6 +2207,11 @@ function PitchdecksTab({ contacts }) {
       {selected && selectedResult && !selectedResult.error && (
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
 
+          {/* Close button */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8, flexShrink: 0 }}>
+            <button onClick={() => setSelected(null)} style={{ background: "none", border: "1px solid #2a2a3a", borderRadius: 6, color: "#888", cursor: "pointer", fontSize: 12, padding: "4px 12px" }}>✕ Close</button>
+          </div>
+
           {/* Deal summary */}
           {selectedResult.dealDetails && (
             <div style={{ background: "#0d0d14", border: "1px solid #6366f130", borderRadius: 12, padding: 16, marginBottom: 16, flexShrink: 0 }}>
@@ -2286,8 +2291,9 @@ function PitchdecksTab({ contacts }) {
       )}
 
       {selected && selectedResult?.error && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#ef4444", fontSize: 13 }}>
-          {selectedResult.error}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+          <div style={{ color: "#ef4444", fontSize: 13 }}>{selectedResult.error}</div>
+          <button onClick={() => setSelected(null)} style={{ background: "none", border: "1px solid #2a2a3a", borderRadius: 6, color: "#888", cursor: "pointer", fontSize: 12, padding: "4px 12px" }}>✕ Close</button>
         </div>
       )}
 
@@ -2295,6 +2301,7 @@ function PitchdecksTab({ contacts }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: "#555" }}>
           <div style={{ fontSize: 32 }}>📊</div>
           <div>Click "Find Matches" to analyze this deck</div>
+          <button onClick={() => setSelected(null)} style={{ background: "none", border: "1px solid #2a2a3a", borderRadius: 6, color: "#888", cursor: "pointer", fontSize: 12, padding: "4px 12px" }}>✕ Close</button>
         </div>
       )}
 
