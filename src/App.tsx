@@ -638,13 +638,20 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
   }
 
   // Activity modal content
+  const [viewingEmail, setViewingEmail] = useState(null);
+
   function getActivityModalContent() {
     if (activityModal === "emails") {
       return {
         title: `Emails Sent Today (${emailsDone})`,
         items: todayEmailsSent.map(e => {
           const c = contacts.find(x => x.id === e.contactId);
-          return { name: c ? (c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim()) : "Unknown", sub: e.subject || "(no subject)", time: e.date };
+          return {
+            name: c ? (c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim()) : (e.to || "Unknown"),
+            sub: e.subject || "(no subject)",
+            time: e.date,
+            email: e
+          };
         })
       };
     }
@@ -668,6 +675,21 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
     }
     return { title: "", items: [] };
   }
+
+  // Emails needing reply — last message from contact is received, not sent
+  const needsReply = React.useMemo(() => {
+    const byContact = {};
+    emails.forEach(e => {
+      if (!e.contactId) return;
+      if (!byContact[e.contactId] || e.date > byContact[e.contactId].date) {
+        byContact[e.contactId] = e;
+      }
+    });
+    return Object.values(byContact)
+      .filter(e => e.direction === "received")
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 20);
+  }, [emails]);
 
   function SectionHeader({ title, count, color = "#9999cc" }) {
     return (
@@ -719,7 +741,7 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
         {[
           { label: "Total Contacts", value: (backendStats?.totalContacts || totalContacts || 0).toLocaleString(), color: "#6366f1" },
-          { label: "Pending Tasks", value: pendingTasks.length, color: "#10b981" },
+          { label: "Emails Today", value: todayEmailsSent.length, color: "#10b981" },
           { label: "Cold Relationships", value: coldContacts.length, color: "#ef4444" },
           { label: "Overdue Tasks", value: overdueTasks.length, color: "#f59e0b" },
         ].map(s => (
@@ -809,20 +831,39 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
       {activityModal && (() => {
         const { title, items } = getActivityModalContent();
         return (
-          <Modal title={title} onClose={() => setActivityModal(null)}>
-            <div style={{ display: "grid", gap: 8, maxHeight: 400, overflowY: "auto" }}>
-              {items.length === 0 && <div style={{ color: "#555", textAlign: "center", padding: 20 }}>Nothing logged yet today.</div>}
-              {items.map((item, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "10px 14px" }}>
-                  <Avatar name={item.name || "?"} size={30} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
-                    {item.sub && <div style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.sub}</div>}
+          <Modal title={title} onClose={() => { setActivityModal(null); setViewingEmail(null); }}>
+            {viewingEmail ? (
+              <div>
+                <button onClick={() => setViewingEmail(null)} style={{ background: "none", border: "none", color: "#6366f1", cursor: "pointer", fontSize: 12, marginBottom: 12, padding: 0 }}>← Back to list</button>
+                <div style={{ background: "#080810", borderRadius: 10, padding: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff", marginBottom: 4 }}>{viewingEmail.subject || "(no subject)"}</div>
+                  <div style={{ fontSize: 11, color: "#666", marginBottom: 12 }}>
+                    {viewingEmail.direction === "sent" ? "To: " : "From: "}
+                    {contacts.find(c => c.id === viewingEmail.contactId)?.name || viewingEmail.contactId} · {viewingEmail.date}
                   </div>
-                  {item.time && <div style={{ fontSize: 11, color: "#555", flexShrink: 0 }}>{item.time}</div>}
+                  <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                    {viewingEmail.body || viewingEmail.snippet || "(Email body not available — view in Gmail for full content)"}
+                  </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 8, maxHeight: 400, overflowY: "auto" }}>
+                {items.length === 0 && <div style={{ color: "#555", textAlign: "center", padding: 20 }}>Nothing logged yet today.</div>}
+                {items.map((item, i) => (
+                  <div key={i}
+                    onClick={() => item.email && setViewingEmail(item.email)}
+                    style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "10px 14px", cursor: item.email ? "pointer" : "default", transition: "background 0.15s" }}>
+                    <Avatar name={item.name || "?"} size={30} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                      {item.sub && <div style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.sub}</div>}
+                    </div>
+                    {item.time && <div style={{ fontSize: 11, color: "#555", flexShrink: 0 }}>{item.time}</div>}
+                    {item.email && <div style={{ fontSize: 11, color: "#6366f1", flexShrink: 0 }}>→</div>}
+                  </div>
+                ))}
+              </div>
+            )}
           </Modal>
         );
       })()}
@@ -989,6 +1030,51 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
       </div>
 
       {/* Cold contacts alert */}
+      {/* Needs Reply */}
+      {needsReply.length > 0 && (
+        <div style={{ background: "#6366f110", border: "1px solid #6366f130", borderRadius: 12, padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, color: "#6366f1", fontFamily: "'Syne', sans-serif", fontSize: 14 }}>
+              📬 Needs Your Reply ({needsReply.length})
+            </div>
+            <span style={{ fontSize: 11, color: "#555" }}>last message is from them</span>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {needsReply.map(e => {
+              const c = contacts.find(x => x.id === e.contactId);
+              const name = c ? (c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim()) : "Unknown";
+              return (
+                <div key={e.id} onClick={() => setViewingEmail(e)}
+                  style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "10px 14px", cursor: "pointer" }}>
+                  <Avatar name={name} size={28} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+                    <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.subject || "(no subject)"}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6366f1", flexShrink: 0 }}>{e.date}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Email viewer modal */}
+      {viewingEmail && (
+        <Modal title="Email" onClose={() => setViewingEmail(null)}>
+          <div style={{ background: "#080810", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#f0f0ff", marginBottom: 6 }}>{viewingEmail.subject || "(no subject)"}</div>
+            <div style={{ fontSize: 11, color: "#666", marginBottom: 14 }}>
+              {viewingEmail.direction === "sent" ? "To: " : "From: "}
+              {contacts.find(c => c.id === viewingEmail.contactId)?.name || "Unknown"} · {viewingEmail.date}
+            </div>
+            <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+              {viewingEmail.body || viewingEmail.snippet || "(Full email body not stored — only subject and metadata are synced from Gmail)"}
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {coldContacts.length > 0 && (
         <div style={{ background: "#ef444410", border: "1px solid #ef444430", borderRadius: 12, padding: 20 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
@@ -1466,12 +1552,14 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
     name: c.name || [c.firstName, c.middleName, c.lastName, c.suffix].filter(Boolean).join(" ") || c.company || "Unknown"
   }));
 
+  // Contacts who have been emailed (for "Active" filter)
+  const emailedContactIds = new Set(emails.map(e => e.contactId).filter(Boolean));
+
   // Client-side filter on top of server-paginated results
   const filtered = contactsWithNames.filter(c => {
-    // Only show contacts with an actual personal name — check original fields before fallback
     const hasPersonalName = c.firstName || c.lastName || (c.name && c.name !== c.company);
     if (!hasPersonalName) return false;
-    const matchFilter = filter === "all" || c.status === filter;
+    const matchFilter = filter === "all" || c.status === filter || (filter === "emailed" && emailedContactIds.has(c.id));
     const matchGroup = groupFilter === "all" || (c.groups || []).includes(groupFilter);
     const matchImportGroup = importGroupFilter === "all" || (c.importGroups || "").split(",").map(g => g.trim()).includes(importGroupFilter);
     return matchFilter && matchGroup && matchImportGroup;
@@ -1500,7 +1588,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
       <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
         <input value={searchInput} onChange={e => handleSearchChange(e.target.value)} placeholder="Search contacts…" style={{ flex: 1, minWidth: 180, background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#e0e0ff", fontSize: 14, fontFamily: "inherit", outline: "none" }} />
         <select value={filter} onChange={e => setFilter(e.target.value)} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#e0e0ff", fontSize: 14, fontFamily: "inherit", outline: "none" }}>
-          {["all","prospect","active","customer","inactive"].map(s => <option key={s} value={s}>{s === "all" ? "All Statuses" : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          {["all","emailed","prospect","active","customer","inactive"].map(s => <option key={s} value={s}>{s === "all" ? "All Statuses" : s === "emailed" ? "Emailed (Active)" : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
         </select>
         <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)} style={{ background: "#0d0d14", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#e0e0ff", fontSize: 14, fontFamily: "inherit", outline: "none" }}>
           <option value="all">All Groups</option>
