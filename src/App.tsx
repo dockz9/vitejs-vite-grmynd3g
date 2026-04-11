@@ -639,6 +639,7 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
 
   // Activity modal content
   const [viewingEmail, setViewingEmail] = useState(null);
+  const [needsReplyContact, setNeedsReplyContact] = useState(null);
 
   function getActivityModalContent() {
     if (activityModal === "emails") {
@@ -886,7 +887,9 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
           {/* Completed today */}
           {(() => {
             const allCompleted = [
-              ...todayEmailsSent.map(e => ({ type: "email", id: e.id, icon: "✉", label: e.subject || "Email sent", contactId: e.contactId, color: "#6366f1", item: e })),
+              ...todayEmailsSent
+                .filter(e => e.contactId && (e.contactName || contacts.find(c => c.id === e.contactId)))
+                .map(e => ({ type: "email", id: e.id, icon: "✉", label: e.subject || "Email sent", contactId: e.contactId, color: "#6366f1", item: e })),
               ...completedTodayTasks.map(t => ({ type: "task", id: t.id, icon: "✓", label: t.title, contactId: t.contactId, color: "#10b981", item: t })),
             ].slice(0, 30);
             const [showAllCompleted, setShowAllCompleted] = useState(false);
@@ -1080,25 +1083,45 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
           </div>
           <div style={{ display: "grid", gap: 8 }}>
             {needsReply.map(e => {
-              // Look up in current contacts page, fall back to email "from" field
               const c = contacts.find(x => x.id === e.contactId);
               const name = c
                 ? (c.lastName ? `${c.lastName}, ${c.firstName || ""}` : c.name)
-                : (e.contactName || e.fromName || e.from || "Contact");
+                : (e.contactName && e.contactName !== "" ? e.contactName : null);
+              if (!name) return null; // skip if no name available
               return (
-                <div key={e.id} onClick={() => setViewingEmail(e)}
-                  style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "10px 14px", cursor: "pointer" }}>
+                <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "10px 14px" }}>
                   <Avatar name={name} size={28} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
-                    <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.subject || "(no subject)"}</div>
+                    <div
+                      onClick={() => c && setNeedsReplyContact(c)}
+                      style={{ fontSize: 12, fontWeight: 700, color: c ? "#6366f1" : "#f0f0ff", cursor: c ? "pointer" : "default", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: c ? "underline" : "none" }}>
+                      {name}
+                    </div>
+                    <div
+                      onClick={() => setViewingEmail(e)}
+                      style={{ fontSize: 11, color: "#888", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {e.subject || "(no subject)"} →
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: "#6366f1", flexShrink: 0 }}>{e.date}</div>
+                  <div style={{ fontSize: 11, color: "#555", flexShrink: 0 }}>{e.date}</div>
                 </div>
               );
             })}
           </div>
         </div>
+      )}
+
+      {/* Contact detail from needs reply */}
+      {needsReplyContact && (
+        <Modal title={needsReplyContact.name || `${needsReplyContact.firstName || ""} ${needsReplyContact.lastName || ""}`.trim()} onClose={() => setNeedsReplyContact(null)}>
+          <div style={{ display: "grid", gap: 10 }}>
+            {needsReplyContact.jobTitle && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#555" }}>Title: </span>{needsReplyContact.jobTitle}</div>}
+            {needsReplyContact.company && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#555" }}>Company: </span>{needsReplyContact.company}</div>}
+            {needsReplyContact.email && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#555" }}>Email: </span><a href={`mailto:${needsReplyContact.email}`} style={{ color: "#6366f1" }}>{needsReplyContact.email}</a></div>}
+            {needsReplyContact.phone && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#555" }}>Phone: </span>{needsReplyContact.phone}</div>}
+            {needsReplyContact.metroArea && <div style={{ fontSize: 13, color: "#ccc" }}><span style={{ color: "#555" }}>Location: </span>{needsReplyContact.metroArea}</div>}
+          </div>
+        </Modal>
       )}
 
       {/* Email viewer modal */}
@@ -1594,7 +1617,7 @@ function ContactsTab({ contactsCol, emails, meetings, groups }) {
     name: c.name || [c.firstName, c.middleName, c.lastName, c.suffix].filter(Boolean).join(" ") || c.company || "Unknown"
   }));
 
-  // Contacts who have been emailed (for "Active" filter)
+  // Contacts who have been emailed in either direction
   const emailedContactIds = new Set(emails.map(e => e.contactId).filter(Boolean));
 
   // Client-side filter on top of server-paginated results
