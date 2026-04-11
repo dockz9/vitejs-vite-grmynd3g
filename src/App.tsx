@@ -572,6 +572,74 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
     setLoadingActions(false);
   }
 
+  // ─── DAILY ACTIVITY TRACKER ────────────────────────────────────────────────
+  const GOALS = { emails: 20, calls: 10, meetings: 5 };
+
+  // Get start of current week (Sunday)
+  function getWeekStart() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - d.getDay()); // Sunday
+    return d.toISOString().slice(0, 10);
+  }
+
+  // Dismissed activity tracker items stored in localStorage
+  const [manualCalls, setManualCalls] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("manualCalls_" + today) || "[]"); } catch { return []; }
+  });
+  const [manualMeetings, setManualMeetings] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("manualMeetings_" + today) || "[]"); } catch { return []; }
+  });
+  const [showLogCall, setShowLogCall] = useState(false);
+  const [showLogMeeting, setShowLogMeeting] = useState(false);
+  const [logForm, setLogForm] = useState({ name: "", notes: "" });
+
+  // Today's emails sent
+  const todayEmailsSent = emails.filter(e => e.direction === "sent" && e.date === today);
+
+  // This week's unique contacts emailed (resets Sunday)
+  const weekStart = getWeekStart();
+  const weeklyUniqueContacts = new Set(
+    emails.filter(e => e.direction === "sent" && e.date >= weekStart).map(e => e.contactId)
+  );
+
+  // Today's calls — from calendar events with "call" in title + manual
+  const todayCallEvents = meetings.filter(m =>
+    m.date === today &&
+    (m.title?.toLowerCase().includes("call") || m.title?.toLowerCase().includes("phone"))
+  );
+  const totalCallsToday = todayCallEvents.length + manualCalls.length;
+
+  // Today's meetings — from calendar + manual
+  const todayMeetingEvents = meetings.filter(m =>
+    m.date === today &&
+    !m.title?.toLowerCase().includes("call") &&
+    !m.title?.toLowerCase().includes("phone")
+  );
+  const totalMeetingsToday = todayMeetingEvents.length + manualMeetings.length;
+
+  const emailsDone = todayEmailsSent.length;
+  const callsDone = totalCallsToday;
+  const meetingsDone = totalMeetingsToday;
+
+  const allGoalsMet = emailsDone >= GOALS.emails && callsDone >= GOALS.calls && meetingsDone >= GOALS.meetings;
+
+  function logCall() {
+    const updated = [...manualCalls, { name: logForm.name, notes: logForm.notes, time: new Date().toISOString() }];
+    setManualCalls(updated);
+    localStorage.setItem("manualCalls_" + today, JSON.stringify(updated));
+    setLogForm({ name: "", notes: "" });
+    setShowLogCall(false);
+  }
+
+  function logMeeting() {
+    const updated = [...manualMeetings, { name: logForm.name, notes: logForm.notes, time: new Date().toISOString() }];
+    setManualMeetings(updated);
+    localStorage.setItem("manualMeetings_" + today, JSON.stringify(updated));
+    setLogForm({ name: "", notes: "" });
+    setShowLogMeeting(false);
+  }
+
   function SectionHeader({ title, count, color = "#9999cc" }) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
@@ -632,6 +700,79 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
           </div>
         ))}
       </div>
+
+      {/* ── DAILY ACTIVITY TRACKER ── */}
+      <div style={{ background: allGoalsMet ? "#10b98110" : "#0d0d14", border: `1px solid ${allGoalsMet ? "#10b98140" : "#1a1a2a"}`, borderRadius: 12, padding: 20 }}>
+        {allGoalsMet ? (
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>🎉</div>
+            <div style={{ fontWeight: 800, color: "#10b981", fontFamily: "'Syne', sans-serif", fontSize: 18 }}>Congrats! You crushed today's goals!</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{emailsDone} emails · {callsDone} calls · {meetingsDone} meetings</div>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontWeight: 700, color: "#f0f0ff", fontFamily: "'Syne', sans-serif", fontSize: 14 }}>Daily Goals</div>
+                <div style={{ fontSize: 11, color: "#555" }}>{weeklyUniqueContacts.size} unique contacts emailed this week · resets Sunday</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn size="sm" variant="ghost" onClick={() => { setLogForm({ name: "", notes: "" }); setShowLogCall(true); }}>+ Log Call</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => { setLogForm({ name: "", notes: "" }); setShowLogMeeting(true); }}>+ Log Meeting</Btn>
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: 14 }}>
+              {[
+                { label: "Emails", done: emailsDone, goal: GOALS.emails, color: "#6366f1", sub: `${weeklyUniqueContacts.size} unique this week` },
+                { label: "Calls", done: callsDone, goal: GOALS.calls, color: "#10b981", sub: `${todayCallEvents.length} from calendar · ${manualCalls.length} logged` },
+                { label: "Meetings", done: meetingsDone, goal: GOALS.meetings, color: "#f59e0b", sub: `${todayMeetingEvents.length} from calendar · ${manualMeetings.length} logged` },
+              ].map(({ label, done, goal, color, sub }) => {
+                const pct = Math.min(100, Math.round((done / goal) * 100));
+                const met = done >= goal;
+                return (
+                  <div key={label}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: met ? color : "#f0f0ff" }}>{label}</span>
+                        {met && <span style={{ fontSize: 11, color }}>✓ Done!</span>}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: met ? color : "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{done} / {goal}</div>
+                    </div>
+                    <div style={{ height: 8, background: "#1a1a2a", borderRadius: 10, overflow: "hidden", marginBottom: 4 }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: met ? color : `${color}99`, borderRadius: 10, transition: "width 0.5s ease" }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "#555" }}>{sub}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Log Call Modal */}
+      {showLogCall && (
+        <Modal title="Log a Call" onClose={() => setShowLogCall(false)}>
+          <Field label="Who did you call?" value={logForm.name} onChange={v => setLogForm(f => ({ ...f, name: v }))} />
+          <Field label="Notes" value={logForm.notes} onChange={v => setLogForm(f => ({ ...f, notes: v }))} />
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <Btn variant="ghost" onClick={() => setShowLogCall(false)}>Cancel</Btn>
+            <Btn onClick={logCall} disabled={!logForm.name}>Log Call</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {/* Log Meeting Modal */}
+      {showLogMeeting && (
+        <Modal title="Log a Meeting" onClose={() => setShowLogMeeting(false)}>
+          <Field label="Who did you meet?" value={logForm.name} onChange={v => setLogForm(f => ({ ...f, name: v }))} />
+          <Field label="Notes" value={logForm.notes} onChange={v => setLogForm(f => ({ ...f, notes: v }))} />
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <Btn variant="ghost" onClick={() => setShowLogMeeting(false)}>Cancel</Btn>
+            <Btn onClick={logMeeting} disabled={!logForm.name}>Log Meeting</Btn>
+          </div>
+        </Modal>
+      )}
 
       {/* Main two-column layout */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
