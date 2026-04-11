@@ -687,10 +687,10 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
       }
     });
     return Object.values(byContact)
-      .filter(e => e.direction === "received")
+      .filter(e => e.direction === "received" && (e.contactName || contacts.find(c => c.id === e.contactId)))
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, 20);
-  }, [emails]);
+  }, [emails, contacts]);
 
   function SectionHeader({ title, count, color = "#9999cc" }) {
     return (
@@ -888,7 +888,7 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
           {(() => {
             const allCompleted = [
               ...todayEmailsSent
-                .filter(e => e.contactId && (e.contactName || contacts.find(c => c.id === e.contactId)))
+                .filter(e => e.contactId)
                 .map(e => ({ type: "email", id: e.id, icon: "✉", label: e.subject || "Email sent", contactId: e.contactId, color: "#6366f1", item: e })),
               ...completedTodayTasks.map(t => ({ type: "task", id: t.id, icon: "✓", label: t.title, contactId: t.contactId, color: "#10b981", item: t })),
             ].slice(0, 30);
@@ -922,7 +922,9 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
                 <div style={{ display: "grid", gap: 6 }}>
                   {displayed.map(item => {
                     const contact = contacts.find(c => c.id === item.contactId);
-                    const name = contact ? (contact.lastName ? `${contact.lastName}, ${contact.firstName || ""}` : contact.name) : "";
+                    const name = contact
+                      ? (contact.lastName ? `${contact.lastName}, ${contact.firstName || ""}` : contact.name)
+                      : (item.item?.contactName || "");
                     return (
                       <div key={item.id} onClick={() => setViewingItem(viewingItem?.id === item.id ? null : item)}
                         style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: viewingItem?.id === item.id ? "#1a1a2a" : "#080810", borderRadius: 8, cursor: "pointer", transition: "background 0.15s" }}>
@@ -1087,7 +1089,7 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
               const name = c
                 ? (c.lastName ? `${c.lastName}, ${c.firstName || ""}` : c.name)
                 : (e.contactName && e.contactName !== "" ? e.contactName : null);
-              if (!name) return null; // skip if no name available
+              if (!name) return null;
               return (
                 <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "10px 14px" }}>
                   <Avatar name={name} size={28} />
