@@ -884,24 +884,63 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
           </div>
 
           {/* Completed today */}
-          <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
-            <SectionHeader title="Completed Today" count={completedTodayMeetings.length + completedTodayTasks.length + todayEmails.length} color="#10b981" />
-            {completedTodayMeetings.length === 0 && completedTodayTasks.length === 0 && todayEmails.length === 0 && (
-              <div style={{ fontSize: 12, color: "#444", fontStyle: "italic" }}>Nothing completed yet today — go Win This Moment!</div>
-            )}
-            {completedTodayMeetings.map(m => {
-              const contact = contacts.find(c => c.id === m.contactId);
-              return <ActivityItem key={m.id} icon="📅" label={m.title} sub={contact ? `${contact.lastName || contact.name} · ${m.time}` : m.time} color="#3b82f6" />;
-            })}
-            {completedTodayTasks.map(t => {
-              const contact = contacts.find(c => c.id === t.contactId);
-              return <ActivityItem key={t.id} icon="✓" label={t.title} sub={contact ? `${contact.lastName || contact.name}` : ""} color="#10b981" />;
-            })}
-            {todayEmails.map(e => {
-              const contact = contacts.find(c => c.id === e.contactId);
-              return <ActivityItem key={e.id} icon="✉" label={e.subject || "Email sent"} sub={contact ? `${contact.lastName || contact.name}` : ""} color="#6366f1" />;
-            })}
-          </div>
+          {(() => {
+            const allCompleted = [
+              ...todayEmailsSent.map(e => ({ type: "email", id: e.id, icon: "✉", label: e.subject || "Email sent", contactId: e.contactId, color: "#6366f1", item: e })),
+              ...completedTodayTasks.map(t => ({ type: "task", id: t.id, icon: "✓", label: t.title, contactId: t.contactId, color: "#10b981", item: t })),
+            ].slice(0, 30);
+            const [showAllCompleted, setShowAllCompleted] = useState(false);
+            const [viewingItem, setViewingItem] = useState(null);
+            const displayed = showAllCompleted ? allCompleted : allCompleted.slice(0, 8);
+            return (
+              <div style={{ background: "#0d0d14", border: "1px solid #1a1a2a", borderRadius: 12, padding: 20 }}>
+                <div onClick={() => setShowAllCompleted(s => !s)} style={{ cursor: "pointer", marginBottom: 12 }}>
+                  <SectionHeader title={`Completed Today ${showAllCompleted ? "▴" : "▾"}`} count={allCompleted.length} color="#10b981" />
+                </div>
+                {allCompleted.length === 0 && (
+                  <div style={{ fontSize: 12, color: "#444", fontStyle: "italic" }}>Nothing completed yet today — go Win This Moment!</div>
+                )}
+                {viewingItem && (
+                  <div style={{ background: "#080810", borderRadius: 10, padding: 14, marginBottom: 12, border: "1px solid #1e1e2e" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff" }}>{viewingItem.label}</div>
+                      <button onClick={() => setViewingItem(null)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14 }}>✕</button>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#666" }}>
+                      {viewingItem.type === "email" ? `Subject: ${viewingItem.item.subject || "(no subject)"} · ${viewingItem.item.date}` : `Task · ${viewingItem.item.dueDate || ""}`}
+                    </div>
+                    {viewingItem.item.notes && <div style={{ fontSize: 12, color: "#ccc", marginTop: 8 }}>{viewingItem.item.notes}</div>}
+                    {viewingItem.item.body && <div style={{ fontSize: 12, color: "#ccc", marginTop: 8, whiteSpace: "pre-wrap" }}>{viewingItem.item.body}</div>}
+                    {!viewingItem.item.body && !viewingItem.item.notes && viewingItem.type === "email" && (
+                      <div style={{ fontSize: 11, color: "#555", marginTop: 8, fontStyle: "italic" }}>Full body not stored — view in Gmail for content</div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display: "grid", gap: 6 }}>
+                  {displayed.map(item => {
+                    const contact = contacts.find(c => c.id === item.contactId);
+                    const name = contact ? (contact.lastName ? `${contact.lastName}, ${contact.firstName || ""}` : contact.name) : "";
+                    return (
+                      <div key={item.id} onClick={() => setViewingItem(viewingItem?.id === item.id ? null : item)}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: viewingItem?.id === item.id ? "#1a1a2a" : "#080810", borderRadius: 8, cursor: "pointer", transition: "background 0.15s" }}>
+                        <div style={{ width: 24, height: 24, borderRadius: 6, background: item.color + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>{item.icon}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</div>
+                          {name && <div style={{ fontSize: 11, color: "#666" }}>{name}</div>}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#555", flexShrink: 0 }}>{item.type}</div>
+                      </div>
+                    );
+                  })}
+                  {!showAllCompleted && allCompleted.length > 8 && (
+                    <div onClick={() => setShowAllCompleted(true)} style={{ fontSize: 11, color: "#6366f1", textAlign: "center", cursor: "pointer", padding: "4px 0" }}>
+                      +{allCompleted.length - 8} more — tap to see all
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Follow-up tracker */}
           {followUps.length > 0 && (
@@ -1041,8 +1080,11 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
           </div>
           <div style={{ display: "grid", gap: 8 }}>
             {needsReply.map(e => {
+              // Look up in current contacts page, fall back to email "from" field
               const c = contacts.find(x => x.id === e.contactId);
-              const name = c ? (c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim()) : "Unknown";
+              const name = c
+                ? (c.lastName ? `${c.lastName}, ${c.firstName || ""}` : c.name)
+                : (e.contactName || e.fromName || e.from || "Contact");
               return (
                 <div key={e.id} onClick={() => setViewingEmail(e)}
                   style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "10px 14px", cursor: "pointer" }}>
