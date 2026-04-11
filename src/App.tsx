@@ -575,15 +575,13 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
   // ─── DAILY ACTIVITY TRACKER ────────────────────────────────────────────────
   const GOALS = { emails: 20, calls: 10, meetings: 5 };
 
-  // Get start of current week (Sunday)
   function getWeekStart() {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - d.getDay()); // Sunday
+    d.setDate(d.getDate() - d.getDay());
     return d.toISOString().slice(0, 10);
   }
 
-  // Dismissed activity tracker items stored in localStorage
   const [manualCalls, setManualCalls] = useState(() => {
     try { return JSON.parse(localStorage.getItem("manualCalls_" + today) || "[]"); } catch { return []; }
   });
@@ -593,24 +591,24 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
   const [showLogCall, setShowLogCall] = useState(false);
   const [showLogMeeting, setShowLogMeeting] = useState(false);
   const [logForm, setLogForm] = useState({ name: "", notes: "" });
+  const [activityModal, setActivityModal] = useState(null); // "emails" | "calls" | "meetings"
 
-  // Today's emails sent
+  // TODAY only
   const todayEmailsSent = emails.filter(e => e.direction === "sent" && e.date === today);
 
-  // This week's unique contacts emailed (resets Sunday)
+  // Weekly unique contacts (resets Sunday)
   const weekStart = getWeekStart();
-  const weeklyUniqueContacts = new Set(
-    emails.filter(e => e.direction === "sent" && e.date >= weekStart).map(e => e.contactId)
-  );
+  const weeklyEmailedContacts = emails.filter(e => e.direction === "sent" && e.date >= weekStart);
+  const weeklyUniqueContacts = new Set(weeklyEmailedContacts.map(e => e.contactId));
 
-  // Today's calls — from calendar events with "call" in title + manual
+  // Today's calls from calendar
   const todayCallEvents = meetings.filter(m =>
     m.date === today &&
     (m.title?.toLowerCase().includes("call") || m.title?.toLowerCase().includes("phone"))
   );
   const totalCallsToday = todayCallEvents.length + manualCalls.length;
 
-  // Today's meetings — from calendar + manual
+  // Today's meetings from calendar
   const todayMeetingEvents = meetings.filter(m =>
     m.date === today &&
     !m.title?.toLowerCase().includes("call") &&
@@ -621,7 +619,6 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
   const emailsDone = todayEmailsSent.length;
   const callsDone = totalCallsToday;
   const meetingsDone = totalMeetingsToday;
-
   const allGoalsMet = emailsDone >= GOALS.emails && callsDone >= GOALS.calls && meetingsDone >= GOALS.meetings;
 
   function logCall() {
@@ -638,6 +635,38 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
     localStorage.setItem("manualMeetings_" + today, JSON.stringify(updated));
     setLogForm({ name: "", notes: "" });
     setShowLogMeeting(false);
+  }
+
+  // Activity modal content
+  function getActivityModalContent() {
+    if (activityModal === "emails") {
+      return {
+        title: `Emails Sent Today (${emailsDone})`,
+        items: todayEmailsSent.map(e => {
+          const c = contacts.find(x => x.id === e.contactId);
+          return { name: c ? (c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim()) : "Unknown", sub: e.subject || "(no subject)", time: e.date };
+        })
+      };
+    }
+    if (activityModal === "calls") {
+      return {
+        title: `Calls Today (${callsDone})`,
+        items: [
+          ...todayCallEvents.map(m => ({ name: m.title, sub: m.time || "", time: m.date })),
+          ...manualCalls.map(c => ({ name: c.name, sub: c.notes || "", time: c.time?.slice(11, 16) }))
+        ]
+      };
+    }
+    if (activityModal === "meetings") {
+      return {
+        title: `Meetings Today (${meetingsDone})`,
+        items: [
+          ...todayMeetingEvents.map(m => ({ name: m.title, sub: m.time || "", time: m.date })),
+          ...manualMeetings.map(m => ({ name: m.name, sub: m.notes || "", time: m.time?.slice(11, 16) }))
+        ]
+      };
+    }
+    return { title: "", items: [] };
   }
 
   function SectionHeader({ title, count, color = "#9999cc" }) {
@@ -723,18 +752,20 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
             </div>
             <div style={{ display: "grid", gap: 14 }}>
               {[
-                { label: "Emails", done: emailsDone, goal: GOALS.emails, color: "#6366f1", sub: `${weeklyUniqueContacts.size} unique this week` },
-                { label: "Calls", done: callsDone, goal: GOALS.calls, color: "#10b981", sub: `${todayCallEvents.length} from calendar · ${manualCalls.length} logged` },
-                { label: "Meetings", done: meetingsDone, goal: GOALS.meetings, color: "#f59e0b", sub: `${todayMeetingEvents.length} from calendar · ${manualMeetings.length} logged` },
-              ].map(({ label, done, goal, color, sub }) => {
+                { label: "Emails", done: emailsDone, goal: GOALS.emails, color: "#6366f1", key: "emails", sub: `${weeklyUniqueContacts.size} unique contacts emailed this week` },
+                { label: "Calls", done: callsDone, goal: GOALS.calls, color: "#10b981", key: "calls", sub: `${todayCallEvents.length} from calendar · ${manualCalls.length} manually logged` },
+                { label: "Meetings", done: meetingsDone, goal: GOALS.meetings, color: "#f59e0b", key: "meetings", sub: `${todayMeetingEvents.length} from calendar · ${manualMeetings.length} manually logged` },
+              ].map(({ label, done, goal, color, key, sub }) => {
                 const pct = Math.min(100, Math.round((done / goal) * 100));
                 const met = done >= goal;
                 return (
-                  <div key={label}>
+                  <div key={label} onClick={() => done > 0 && setActivityModal(key)}
+                    style={{ cursor: done > 0 ? "pointer" : "default", borderRadius: 8, padding: "4px 0", transition: "background 0.15s" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontSize: 13, fontWeight: 700, color: met ? color : "#f0f0ff" }}>{label}</span>
                         {met && <span style={{ fontSize: 11, color }}>✓ Done!</span>}
+                        {done > 0 && !met && <span style={{ fontSize: 10, color: "#555" }}>tap to see who</span>}
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 800, color: met ? color : "#f0f0ff", fontFamily: "'Syne', sans-serif" }}>{done} / {goal}</div>
                     </div>
@@ -773,6 +804,28 @@ function DashboardTab({ contacts, emails, meetings, totalContacts, tasks = [], t
           </div>
         </Modal>
       )}
+
+      {/* Activity Detail Modal */}
+      {activityModal && (() => {
+        const { title, items } = getActivityModalContent();
+        return (
+          <Modal title={title} onClose={() => setActivityModal(null)}>
+            <div style={{ display: "grid", gap: 8, maxHeight: 400, overflowY: "auto" }}>
+              {items.length === 0 && <div style={{ color: "#555", textAlign: "center", padding: 20 }}>Nothing logged yet today.</div>}
+              {items.map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#080810", borderRadius: 8, padding: "10px 14px" }}>
+                  <Avatar name={item.name || "?"} size={30} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#f0f0ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                    {item.sub && <div style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.sub}</div>}
+                  </div>
+                  {item.time && <div style={{ fontSize: 11, color: "#555", flexShrink: 0 }}>{item.time}</div>}
+                </div>
+              ))}
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* Main two-column layout */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
